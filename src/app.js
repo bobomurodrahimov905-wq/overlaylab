@@ -36,34 +36,34 @@ const isLine = f => f && f.geometry && /LineString/.test(f.geometry.type);
 const isPoint = f => f && f.geometry && /Point/.test(f.geometry.type);
 
 /* ---------- 3D xarita (deck.gl) ---------- */
-const { Deck, MapView, GeoJsonLayer, SolidPolygonLayer, PathLayer, ColumnLayer, TextLayer, BitmapLayer, ScatterplotLayer, LightingEffect, AmbientLight, DirectionalLight, FlyToInterpolator, WebMercatorViewport } = deck;
+const { TileLayer } = deck; const { Deck, MapView, GeoJsonLayer, SolidPolygonLayer, PathLayer, ColumnLayer, TextLayer, BitmapLayer, ScatterplotLayer, LightingEffect, AmbientLight, DirectionalLight, FlyToInterpolator, WebMercatorViewport } = deck;
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const HOME = { longitude: 64.3, latitude: 40.2, zoom: 5.05, pitch: 50, bearing: -12 };
-let VS = { longitude: 64.4, latitude: 41.4, zoom: 3.6, pitch: 0, bearing: 0, minZoom: 3, maxZoom: 12, maxPitch: 75 };
+let VS = { longitude: 64.4, latitude: 41.4, zoom: 3.6, pitch: 0, bearing: 0, minZoom: 3, maxZoom: 19.5, maxPitch: 75 };
 let IS3D = true, EXAG = 1, LABELS = true, ORBIT = false, EXT_METRIC = "plita", CITY = null;
 let SLAB = 9000; // viloyat plitasi qalinligi, m (şahar rejimida yupqa)
 /* --- relyef (ETOPO1, 10′) --- */
 let DEMG = null; const VEXBASE = 14;
 function demGrid() { if (DEMG) return DEMG; const d = window.__DATA__.dem, bin = atob(d.z), z = new Int16Array(bin.length / 2); for (let i = 0; i < z.length; i++) { const v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8); z[i] = v > 32767 ? v - 65536 : v; } DEMG = { ...d, z }; return DEMG; }
 function demAt(lon, lat) { const g = demGrid(); let x = (lon - g.lon0) / g.d, y = (g.lat0 - lat) / g.d; x = Math.max(0, Math.min(g.nx - 1.001, x)); y = Math.max(0, Math.min(g.ny - 1.001, y)); const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0, Z = (i, j) => g.z[i * g.nx + j]; return (Z(y0, x0) * (1 - fx) + Z(y0, x0 + 1) * fx) * (1 - fy) + (Z(y0 + 1, x0) * (1 - fx) + Z(y0 + 1, x0 + 1) * fx) * fy; }
-const RELIEF = () => EXT_METRIC === "relyef" && !CITY && IS3D;
+const RELIEF = () => EXT_METRIC === "relyef" && !CITY && !window.__ZOOMED && IS3D;
 const VEX = () => VEXBASE * EXAG;
 const zb = (lon, lat) => RELIEF() ? Math.max(0, demAt(lon, lat)) * VEX() : SLAB; // sirt balandligi
 const pz = (lon, lat) => RELIEF() ? Math.max(0, demAt(lon, lat)) * VEX() : 0;    // ustun asosi
 const baseH = () => RELIEF() ? 0 : SLAB;
 const HYPSO = [[-50, [52, 110, 170]], [0, [58, 98, 70]], [200, [74, 118, 76]], [500, [122, 140, 84]], [1000, [176, 156, 100]], [2000, [150, 112, 80]], [3000, [122, 100, 92]], [4000, [186, 184, 196]], [5000, [242, 244, 247]]];
 function hypso(z) { if (z <= HYPSO[0][0]) return HYPSO[0][1]; for (let i = 1; i < HYPSO.length; i++) if (z <= HYPSO[i][0]) { const [a, ca] = HYPSO[i - 1], [b, cb] = HYPSO[i], t = (z - a) / (b - a); return ca.map((v, k) => Math.round(v + (cb[k] - v) * t)); } return HYPSO[HYPSO.length - 1][1]; }
-const HZ = () => CITY ? .02 : 1; // şahar rejimida baland ustunlarni pasaytiriş
+const ZM = () => CITY || window.__ZOOMED; const HZ = () => ZM() ? .02 : 1; // şahar rejimida baland ustunlarni pasaytiriş
 const hexA = (h, a = 1) => { h = String(h || "#888").replace("#", ""); if (h.length === 3) h = h.split("").map(c => c + c).join(""); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)).concat([Math.round(255 * a)]); };
 const lighting = new LightingEffect({ amb: new AmbientLight({ color: [255, 255, 255], intensity: 1.15 }), sun: new DirectionalLight({ color: [255, 244, 228], intensity: 1.5, direction: [-2, -5, -6] }), fill: new DirectionalLight({ color: [120, 160, 255], intensity: .45, direction: [4, 3, -2] }) });
 const MAT = { ambient: .45, diffuse: .65, shininess: 36, specularColor: [70, 80, 95] };
 const deckgl = new Deck({
   parent: $("#map"), views: new MapView({ repeat: false }), viewState: VS, controller: { dragRotate: true, touchRotate: true, inertia: 300 },
   effects: [lighting], layers: [], useDevicePixels: matchMedia('(max-width:760px)').matches ? Math.min(devicePixelRatio || 1, 1.5) : true, pickingRadius: 4, glOptions: { preserveDrawingBuffer: true }, deviceProps: { webgl: { preserveDrawingBuffer: true } },
-  onViewStateChange: ({ viewState }) => { VS = viewState; deckgl.setProps({ viewState: VS }); hud(); return VS; },
+  onViewStateChange: ({ viewState }) => { VS = viewState; deckgl.setProps({ viewState: VS }); hud(); if (typeof zoomHook === "function") zoomHook(); return VS; },
   onHover: info => { if (info.coordinate) { const [lng, lat] = info.coordinate, z = Math.floor((lng + 180) / 6) + 1, u = proj4("EPSG:4326", "EPSG:326" + Math.min(45, Math.max(38, z)), [lng, lat]); $("#coords").textContent = `φ ${lat.toFixed(4)}°  λ ${lng.toFixed(4)}°  ·  UTM ${z}N  ${Math.round(u[0])} E  ${Math.round(u[1])} N`; } },
   getTooltip: info => tooltip(info),
-  onClick: info => { if (info.object && info.layer && info.layer.props.onPickTable) info.layer.props.onPickTable(info); }
+  onClick: info => { if (window.__pick && info.coordinate) return window.__pick(info); if (info.object && info.layer && info.layer.props.onPickTable) info.layer.props.onPickTable(info); }
 });
 function tooltip({ object, layer }) {
   if (!object || !layer) return null;
@@ -71,7 +71,7 @@ function tooltip({ object, layer }) {
   if (!p) return null;
   return { html: `<div class="tip"><b>${esc(p.title)}</b><table>${Object.entries(p.props || {}).filter(([k]) => !k.startsWith("_")).slice(0, 14).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(typeof v === "number" ? (Number.isInteger(v) ? v.toLocaleString("en-US").replace(/,/g, " ") : v.toFixed(3)) : v)}</td></tr>`).join("")}</table></div>`, style: { background: "rgba(13,23,36,.94)", border: "1px solid rgba(150,180,210,.25)", borderRadius: "10px", padding: "10px 12px", color: "#E9EEF2", boxShadow: "0 12px 30px rgba(0,0,0,.5)", maxWidth: "320px" } };
 }
-function setView(v, dur = 0) { VS = { ...VS, ...v, transitionDuration: dur, transitionInterpolator: dur ? new FlyToInterpolator({ speed: 1.3 }) : null }; deckgl.setProps({ viewState: VS }); hud(); }
+function setView(v, dur = 0) { VS = { ...VS, ...v, transitionDuration: dur, transitionInterpolator: dur ? new FlyToInterpolator({ speed: 1.3 }) : null }; deckgl.setProps({ viewState: VS }); hud(); if (typeof zoomHook === "function") zoomHook(); }
 const MOB = () => matchMedia("(max-width:760px)").matches;
 function fitBBox(bb, extra = {}, maxZ = 9) {
   const el = $("#map"), W = el.clientWidth, H = el.clientHeight, panel = $("#panel").classList.contains("hide") || W < 900 ? 40 : 420, dr = $("#drawer").classList.contains("empty") || $("#drawer").classList.contains("closed") ? 60 : Math.min(H * .55, Math.max(Math.min(H * .42, 360), $("#drawer").offsetHeight + 30));
@@ -192,7 +192,7 @@ D.viloyatlar.features.forEach(f => { f.properties.maydon_km2 = +(planarAreaPerim
   vp.forEach(p => { p.properties._yolz = p.properties._yol / p.properties.maydon_km2 * 1000; p.properties._lbl = turf.pointOnFeature(p).geometry.coordinates; });
 })();
 function metricOf(p) { if (EXT_METRIC.startsWith("k:")) return +p["k_" + EXT_METRIC.slice(2)] || 0; switch (EXT_METRIC) { case "doimiy": return p.aholi || 0; case "ziclik": return p.ziclik || 0; case "aholi": return p._aholi; case "yol": return p._yolz; case "maydon": return p.maydon_km2; case "mcda": return p._mcda || 0; case "balandlik": return Math.max(0, p.bal_ort); default: return 0; } }
-function vilHeight(p, mx) { return EXT_METRIC === "plita" || EXT_METRIC === "relyef" || !mx || CITY ? SLAB : SLAB + 140000 * EXAG * Math.sqrt(metricOf(p) / mx); }
+function vilHeight(p, mx) { return EXT_METRIC === "plita" || EXT_METRIC === "relyef" || !mx || ZM() ? SLAB : SLAB + 140000 * EXAG * Math.sqrt(metricOf(p) / mx); }
 const UZ = D.davlatlar.features.find(f => f.properties.kod === "UZB");
 const GRAT = (() => { const g = []; for (let lon = 54; lon <= 76; lon += 2) g.push({ path: [[lon, 34], [lon, 48]] }); for (let lat = 36; lat <= 48; lat += 2) g.push({ path: [[52, lat], [78, lat]] }); return g; })();
 const ringsOf = fs => fs.flatMap(f => { const g = f.geometry; return (g.type === "Polygon" ? [g.coordinates] : g.coordinates).map(p => ({ path: p[0], f })); });
@@ -217,7 +217,7 @@ LAY.vil = addLayer("Viloyatlar", D.viloyatlar, { style: { fill: "#24384F", strok
   return [
     new GeoJsonLayer({ id: "vil", data: D.viloyatlar, filled: true, stroked: true, extruded: ctx.is3D, wireframe: ctx.is3D, material: MAT, getElevation: f => vilHeight(f.properties, mx), getFillColor: f => colorOf(f.properties), getLineColor: ctx.is3D ? [160, 190, 220, 120] : [143, 167, 189, 255], lineWidthUnits: "pixels", getLineWidth: 1, pickable: true, autoHighlight: true, highlightColor: [255, 79, 139, 90], parameters: { depthCompare: ctx.is3D ? "less-equal" : "always" }, tipFn: f => ({ title: f.properties.nomi, props: { ...(f.properties.aholi ? { "doimiy aholi": fmtI(f.properties.aholi), "ziçlik, kişi/km²": fmt(f.properties.ziclik, 1) } : {}), ...bazaTip(f.properties), "maydon, km²": f.properties.maydon_km2, "şahar aholisi": f.properties._aholi, "yöl ziçligi, km/1000 km²": +f.properties._yolz.toFixed(1), "örtaça balandlik, m": f.properties.bal_ort, "min – maks, m": f.properties.bal_min + " – " + f.properties.bal_max, ...(f.properties._mcda != null ? { "MCDA örtaça S": +f.properties._mcda.toFixed(3) } : {}), ISO: f.properties.iso } }), onPickTable: info => focusVil(info.object.properties.nomi), updateTriggers: { getElevation: [EXT_METRIC, ctx.exag], getFillColor: [EXT_METRIC] }, transitions: { getElevation: 700 } }),
     new PathLayer({ id: "uzline", data: uzRings, getPath: d => ctx.is3D ? d.path.map(c => [c[0], c[1], SLAB + 40]) : d.path, getColor: [232, 196, 127, 255], getWidth: 2.2, widthUnits: "pixels", jointRounded: true, parameters: { depthCompare: ctx.is3D ? "less-equal" : "always" } }),
-    new TextLayer({ id: "vlbl", data: LABELS && !CITY ? D.viloyatlar.features : [], getPosition: f => [f.properties._lbl[0], f.properties._lbl[1], ctx.is3D ? vilHeight(f.properties, mx) + 6000 : 0], getText: f => f.properties.nomi.replace(" viloyati", "").replace(" Resp.", ""), getSize: 12.5, getColor: [233, 238, 242, 230], fontFamily: "IBM Plex Sans, sans-serif", fontWeight: 600, characterSet: "auto", fontSettings: { sdf: true }, outlineWidth: 3, outlineColor: [8, 17, 27, 220], parameters: { depthCompare: "always" }, updateTriggers: { getPosition: [EXT_METRIC, ctx.exag, ctx.is3D] } })
+    new TextLayer({ id: "vlbl", data: LABELS && !ZM() ? D.viloyatlar.features : [], getPosition: f => [f.properties._lbl[0], f.properties._lbl[1], ctx.is3D ? vilHeight(f.properties, mx) + 6000 : 0], getText: f => f.properties.nomi.replace(" viloyati", "").replace(" Resp.", ""), getSize: 12.5, getColor: [233, 238, 242, 230], fontFamily: "IBM Plex Sans, sans-serif", fontWeight: 600, characterSet: "auto", fontSettings: { sdf: true }, outlineWidth: 3, outlineColor: [8, 17, 27, 220], parameters: { depthCompare: "always" }, updateTriggers: { getPosition: [EXT_METRIC, ctx.exag, ctx.is3D] } })
   ]; } });
 /* ---------- tumanlar (geoBoundaries ADM2, 199 ta) ---------- */
 const TUM = D.tumanlar.fc, TUMETA = D.tumanlar.meta;
@@ -242,9 +242,9 @@ LAY.yol = addLayer("Avtomobil yöllari", D.yollar, { style: { fill: "#E9A24E", s
 let popMax = Math.max(...D.shaharlar.features.map(f => f.properties.aholi));
 LAY.sha = addLayer("Şaharlar", D.shaharlar, { style: { fill: "#F2D49B", stroke: "#F2D49B" }, build: ctx => {
   const h = f => baseH() + 160000 * ctx.exag * (RELIEF() ? .45 : 1) * Math.sqrt(f.properties.aholi / popMax), cz = f => pz(f.geometry.coordinates[0], f.geometry.coordinates[1]);
-  const base = ctx.is3D && !CITY ? [new ColumnLayer({ id: "sha3d", data: D.shaharlar.features, getPosition: f => [f.geometry.coordinates[0], f.geometry.coordinates[1], cz(f)], diskResolution: 24, radius: 6500, extruded: true, material: MAT, getElevation: h, getFillColor: f => f.properties.maqomi === "poytaxt" ? [255, 79, 139, 255] : [242, 212, 155, 255], pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 120], tipFn: f => ({ title: f.properties.nomi, props: { aholi: f.properties.aholi, maqomi: f.properties.maqomi, "balandlik, m (ETOPO1)": f.properties.balandlik_m } }), onPickTable: info => focusCity(info.object.properties.nomi), updateTriggers: { getElevation: [ctx.exag] } })]
+  const base = ctx.is3D && !ZM() ? [new ColumnLayer({ id: "sha3d", data: D.shaharlar.features, getPosition: f => [f.geometry.coordinates[0], f.geometry.coordinates[1], cz(f)], diskResolution: 24, radius: 6500, extruded: true, material: MAT, getElevation: h, getFillColor: f => f.properties.maqomi === "poytaxt" ? [255, 79, 139, 255] : [242, 212, 155, 255], pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 120], tipFn: f => ({ title: f.properties.nomi, props: { aholi: f.properties.aholi, maqomi: f.properties.maqomi, "balandlik, m (ETOPO1)": f.properties.balandlik_m } }), onPickTable: info => focusCity(info.object.properties.nomi), updateTriggers: { getElevation: [ctx.exag] } })]
     : [new ScatterplotLayer({ id: "sha2d", data: D.shaharlar.features, getPosition: f => ctx.is3D ? [f.geometry.coordinates[0], f.geometry.coordinates[1], zb(f.geometry.coordinates[0], f.geometry.coordinates[1]) + 80] : f.geometry.coordinates, onPickTable: info => focusCity(info.object.properties.nomi), updateTriggers: { getPosition: [ctx.is3D] }, getRadius: f => 2.5 + Math.sqrt(f.properties.aholi) / 230, radiusUnits: "pixels", getFillColor: f => f.properties.maqomi === "poytaxt" ? [255, 79, 139, 255] : [242, 212, 155, 255], getLineColor: [8, 17, 27, 255], stroked: true, lineWidthUnits: "pixels", getLineWidth: 1, pickable: true, tipFn: f => ({ title: f.properties.nomi, props: { aholi: f.properties.aholi, maqomi: f.properties.maqomi } }), parameters: { depthCompare: "always" } })];
-  if (LABELS && !CITY) base.push(new TextLayer({ id: "shalbl", data: D.shaharlar.features.filter(f => f.properties.aholi >= 200000), getPosition: f => [f.geometry.coordinates[0], f.geometry.coordinates[1], ctx.is3D ? cz(f) + h(f) + 4000 : 0], getText: f => f.properties.nomi, getSize: 11.5, getPixelOffset: ctx.is3D ? [0, -8] : [0, -12], getColor: [242, 212, 155, 255], fontFamily: "IBM Plex Sans, sans-serif", fontWeight: 500, characterSet: "auto", fontSettings: { sdf: true }, outlineWidth: 3, outlineColor: [8, 17, 27, 230], parameters: { depthCompare: "always" }, updateTriggers: { getPosition: [ctx.exag, ctx.is3D] } }));
+  if (LABELS && !ZM()) base.push(new TextLayer({ id: "shalbl", data: D.shaharlar.features.filter(f => f.properties.aholi >= 200000), getPosition: f => [f.geometry.coordinates[0], f.geometry.coordinates[1], ctx.is3D ? cz(f) + h(f) + 4000 : 0], getText: f => f.properties.nomi, getSize: 11.5, getPixelOffset: ctx.is3D ? [0, -8] : [0, -12], getColor: [242, 212, 155, 255], fontFamily: "IBM Plex Sans, sans-serif", fontWeight: 500, characterSet: "auto", fontSettings: { sdf: true }, outlineWidth: 3, outlineColor: [8, 17, 27, 230], parameters: { depthCompare: "always" }, updateTriggers: { getPosition: [ctx.exag, ctx.is3D] } }));
   return base; } });
 $("#lblToggle").addEventListener("change", e => { LABELS = e.target.checked; redraw(); });
 $("#extMetric").addEventListener("change", e => { EXT_METRIC = e.target.value; if (EXT_METRIC === "mcda" && !RES) toast("Avval MCDA tahlilini bajaring"); if (CITY && EXT_METRIC === "relyef") toast("Relyef modeli butun mamlakat körinişida işlaydi"); if (!IS3D && EXT_METRIC !== "plita") set3D(true); if (EXT_METRIC === "relyef") setView({ pitch: Math.max(VS.pitch, 55) }, 900); exagLbl(); redraw(); legendExt(); });

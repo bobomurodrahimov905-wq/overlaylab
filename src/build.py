@@ -40,5 +40,5 @@ if not os.path.exists(os.path.join(R, "ochiq", "aholi.json")):   # birinchi mart
 data["dem"] = json.load(open(os.path.join(H, "data", "dem.json"), encoding="utf-8"))
 open(os.path.join(R, "data.js"), "w", encoding="utf-8").write("window.__DATA__=" + json.dumps(data, ensure_ascii=False, separators=(",", ":")) + ";\n")
 os.makedirs(os.path.join(R, "js"), exist_ok=True)
-open(os.path.join(R, "js", "app.js"), "w", encoding="utf-8").write(open(os.path.join(H, "app.js"), encoding="utf-8").read() + open(os.path.join(H, "soha.js"), encoding="utf-8").read())
+open(os.path.join(R, "js", "app.js"), "w", encoding="utf-8").write(open(os.path.join(H, "app.js"), encoding="utf-8").read() + open(os.path.join(H, "soha.js"), encoding="utf-8").read() + open(os.path.join(H, "joy.js"), encoding="utf-8").read())
 print("tayyor:", os.path.join(R, "index.html"))

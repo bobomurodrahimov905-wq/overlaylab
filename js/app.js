@@ -36,34 +36,34 @@ const isLine = f => f && f.geometry && /LineString/.test(f.geometry.type);
 const isPoint = f => f && f.geometry && /Point/.test(f.geometry.type);
 
 /* ---------- 3D xarita (deck.gl) ---------- */
-const { Deck, MapView, GeoJsonLayer, SolidPolygonLayer, PathLayer, ColumnLayer, TextLayer, BitmapLayer, ScatterplotLayer, LightingEffect, AmbientLight, DirectionalLight, FlyToInterpolator, WebMercatorViewport } = deck;
+const { TileLayer } = deck; const { Deck, MapView, GeoJsonLayer, SolidPolygonLayer, PathLayer, ColumnLayer, TextLayer, BitmapLayer, ScatterplotLayer, LightingEffect, AmbientLight, DirectionalLight, FlyToInterpolator, WebMercatorViewport } = deck;
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const HOME = { longitude: 64.3, latitude: 40.2, zoom: 5.05, pitch: 50, bearing: -12 };
-let VS = { longitude: 64.4, latitude: 41.4, zoom: 3.6, pitch: 0, bearing: 0, minZoom: 3, maxZoom: 12, maxPitch: 75 };
+let VS = { longitude: 64.4, latitude: 41.4, zoom: 3.6, pitch: 0, bearing: 0, minZoom: 3, maxZoom: 19.5, maxPitch: 75 };
 let IS3D = true, EXAG = 1, LABELS = true, ORBIT = false, EXT_METRIC = "plita", CITY = null;
 let SLAB = 9000; // viloyat plitasi qalinligi, m (şahar rejimida yupqa)
 /* --- relyef (ETOPO1, 10′) --- */
 let DEMG = null; const VEXBASE = 14;
 function demGrid() { if (DEMG) return DEMG; const d = window.__DATA__.dem, bin = atob(d.z), z = new Int16Array(bin.length / 2); for (let i = 0; i < z.length; i++) { const v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8); z[i] = v > 32767 ? v - 65536 : v; } DEMG = { ...d, z }; return DEMG; }
 function demAt(lon, lat) { const g = demGrid(); let x = (lon - g.lon0) / g.d, y = (g.lat0 - lat) / g.d; x = Math.max(0, Math.min(g.nx - 1.001, x)); y = Math.max(0, Math.min(g.ny - 1.001, y)); const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0, Z = (i, j) => g.z[i * g.nx + j]; return (Z(y0, x0) * (1 - fx) + Z(y0, x0 + 1) * fx) * (1 - fy) + (Z(y0 + 1, x0) * (1 - fx) + Z(y0 + 1, x0 + 1) * fx) * fy; }
-const RELIEF = () => EXT_METRIC === "relyef" && !CITY && IS3D;
+const RELIEF = () => EXT_METRIC === "relyef" && !CITY && !window.__ZOOMED && IS3D;
 const VEX = () => VEXBASE * EXAG;
 const zb = (lon, lat) => RELIEF() ? Math.max(0, demAt(lon, lat)) * VEX() : SLAB; // sirt balandligi
 const pz = (lon, lat) => RELIEF() ? Math.max(0, demAt(lon, lat)) * VEX() : 0;    // ustun asosi
 const baseH = () => RELIEF() ? 0 : SLAB;
 const HYPSO = [[-50, [52, 110, 170]], [0, [58, 98, 70]], [200, [74, 118, 76]], [500, [122, 140, 84]], [1000, [176, 156, 100]], [2000, [150, 112, 80]], [3000, [122, 100, 92]], [4000, [186, 184, 196]], [5000, [242, 244, 247]]];
 function hypso(z) { if (z <= HYPSO[0][0]) return HYPSO[0][1]; for (let i = 1; i < HYPSO.length; i++) if (z <= HYPSO[i][0]) { const [a, ca] = HYPSO[i - 1], [b, cb] = HYPSO[i], t = (z - a) / (b - a); return ca.map((v, k) => Math.round(v + (cb[k] - v) * t)); } return HYPSO[HYPSO.length - 1][1]; }
-const HZ = () => CITY ? .02 : 1; // şahar rejimida baland ustunlarni pasaytiriş
+const ZM = () => CITY || window.__ZOOMED; const HZ = () => ZM() ? .02 : 1; // şahar rejimida baland ustunlarni pasaytiriş
 const hexA = (h, a = 1) => { h = String(h || "#888").replace("#", ""); if (h.length === 3) h = h.split("").map(c => c + c).join(""); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)).concat([Math.round(255 * a)]); };
 const lighting = new LightingEffect({ amb: new AmbientLight({ color: [255, 255, 255], intensity: 1.15 }), sun: new DirectionalLight({ color: [255, 244, 228], intensity: 1.5, direction: [-2, -5, -6] }), fill: new DirectionalLight({ color: [120, 160, 255], intensity: .45, direction: [4, 3, -2] }) });
 const MAT = { ambient: .45, diffuse: .65, shininess: 36, specularColor: [70, 80, 95] };
 const deckgl = new Deck({
   parent: $("#map"), views: new MapView({ repeat: false }), viewState: VS, controller: { dragRotate: true, touchRotate: true, inertia: 300 },
   effects: [lighting], layers: [], useDevicePixels: matchMedia('(max-width:760px)').matches ? Math.min(devicePixelRatio || 1, 1.5) : true, pickingRadius: 4, glOptions: { preserveDrawingBuffer: true }, deviceProps: { webgl: { preserveDrawingBuffer: true } },
-  onViewStateChange: ({ viewState }) => { VS = viewState; deckgl.setProps({ viewState: VS }); hud(); return VS; },
+  onViewStateChange: ({ viewState }) => { VS = viewState; deckgl.setProps({ viewState: VS }); hud(); if (typeof zoomHook === "function") zoomHook(); return VS; },
   onHover: info => { if (info.coordinate) { const [lng, lat] = info.coordinate, z = Math.floor((lng + 180) / 6) + 1, u = proj4("EPSG:4326", "EPSG:326" + Math.min(45, Math.max(38, z)), [lng, lat]); $("#coords").textContent = `φ ${lat.toFixed(4)}°  λ ${lng.toFixed(4)}°  ·  UTM ${z}N  ${Math.round(u[0])} E  ${Math.round(u[1])} N`; } },
   getTooltip: info => tooltip(info),
-  onClick: info => { if (info.object && info.layer && info.layer.props.onPickTable) info.layer.props.onPickTable(info); }
+  onClick: info => { if (window.__pick && info.coordinate) return window.__pick(info); if (info.object && info.layer && info.layer.props.onPickTable) info.layer.props.onPickTable(info); }
 });
 function tooltip({ object, layer }) {
   if (!object || !layer) return null;
@@ -71,7 +71,7 @@ function tooltip({ object, layer }) {
   if (!p) return null;
   return { html: `<div class="tip"><b>${esc(p.title)}</b><table>${Object.entries(p.props || {}).filter(([k]) => !k.startsWith("_")).slice(0, 14).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(typeof v === "number" ? (Number.isInteger(v) ? v.toLocaleString("en-US").replace(/,/g, " ") : v.toFixed(3)) : v)}</td></tr>`).join("")}</table></div>`, style: { background: "rgba(13,23,36,.94)", border: "1px solid rgba(150,180,210,.25)", borderRadius: "10px", padding: "10px 12px", color: "#E9EEF2", boxShadow: "0 12px 30px rgba(0,0,0,.5)", maxWidth: "320px" } };
 }
-function setView(v, dur = 0) { VS = { ...VS, ...v, transitionDuration: dur, transitionInterpolator: dur ? new FlyToInterpolator({ speed: 1.3 }) : null }; deckgl.setProps({ viewState: VS }); hud(); }
+function setView(v, dur = 0) { VS = { ...VS, ...v, transitionDuration: dur, transitionInterpolator: dur ? new FlyToInterpolator({ speed: 1.3 }) : null }; deckgl.setProps({ viewState: VS }); hud(); if (typeof zoomHook === "function") zoomHook(); }
 const MOB = () => matchMedia("(max-width:760px)").matches;
 function fitBBox(bb, extra = {}, maxZ = 9) {
   const el = $("#map"), W = el.clientWidth, H = el.clientHeight, panel = $("#panel").classList.contains("hide") || W < 900 ? 40 : 420, dr = $("#drawer").classList.contains("empty") || $("#drawer").classList.contains("closed") ? 60 : Math.min(H * .55, Math.max(Math.min(H * .42, 360), $("#drawer").offsetHeight + 30));
@@ -192,7 +192,7 @@ D.viloyatlar.features.forEach(f => { f.properties.maydon_km2 = +(planarAreaPerim
   vp.forEach(p => { p.properties._yolz = p.properties._yol / p.properties.maydon_km2 * 1000; p.properties._lbl = turf.pointOnFeature(p).geometry.coordinates; });
 })();
 function metricOf(p) { if (EXT_METRIC.startsWith("k:")) return +p["k_" + EXT_METRIC.slice(2)] || 0; switch (EXT_METRIC) { case "doimiy": return p.aholi || 0; case "ziclik": return p.ziclik || 0; case "aholi": return p._aholi; case "yol": return p._yolz; case "maydon": return p.maydon_km2; case "mcda": return p._mcda || 0; case "balandlik": return Math.max(0, p.bal_ort); default: return 0; } }
-function vilHeight(p, mx) { return EXT_METRIC === "plita" || EXT_METRIC === "relyef" || !mx || CITY ? SLAB : SLAB + 140000 * EXAG * Math.sqrt(metricOf(p) / mx); }
+function vilHeight(p, mx) { return EXT_METRIC === "plita" || EXT_METRIC === "relyef" || !mx || ZM() ? SLAB : SLAB + 140000 * EXAG * Math.sqrt(metricOf(p) / mx); }
 const UZ = D.davlatlar.features.find(f => f.properties.kod === "UZB");
 const GRAT = (() => { const g = []; for (let lon = 54; lon <= 76; lon += 2) g.push({ path: [[lon, 34], [lon, 48]] }); for (let lat = 36; lat <= 48; lat += 2) g.push({ path: [[52, lat], [78, lat]] }); return g; })();
 const ringsOf = fs => fs.flatMap(f => { const g = f.geometry; return (g.type === "Polygon" ? [g.coordinates] : g.coordinates).map(p => ({ path: p[0], f })); });
@@ -217,7 +217,7 @@ LAY.vil = addLayer("Viloyatlar", D.viloyatlar, { style: { fill: "#24384F", strok
   return [
     new GeoJsonLayer({ id: "vil", data: D.viloyatlar, filled: true, stroked: true, extruded: ctx.is3D, wireframe: ctx.is3D, material: MAT, getElevation: f => vilHeight(f.properties, mx), getFillColor: f => colorOf(f.properties), getLineColor: ctx.is3D ? [160, 190, 220, 120] : [143, 167, 189, 255], lineWidthUnits: "pixels", getLineWidth: 1, pickable: true, autoHighlight: true, highlightColor: [255, 79, 139, 90], parameters: { depthCompare: ctx.is3D ? "less-equal" : "always" }, tipFn: f => ({ title: f.properties.nomi, props: { ...(f.properties.aholi ? { "doimiy aholi": fmtI(f.properties.aholi), "ziçlik, kişi/km²": fmt(f.properties.ziclik, 1) } : {}), ...bazaTip(f.properties), "maydon, km²": f.properties.maydon_km2, "şahar aholisi": f.properties._aholi, "yöl ziçligi, km/1000 km²": +f.properties._yolz.toFixed(1), "örtaça balandlik, m": f.properties.bal_ort, "min – maks, m": f.properties.bal_min + " – " + f.properties.bal_max, ...(f.properties._mcda != null ? { "MCDA örtaça S": +f.properties._mcda.toFixed(3) } : {}), ISO: f.properties.iso } }), onPickTable: info => focusVil(info.object.properties.nomi), updateTriggers: { getElevation: [EXT_METRIC, ctx.exag], getFillColor: [EXT_METRIC] }, transitions: { getElevation: 700 } }),
     new PathLayer({ id: "uzline", data: uzRings, getPath: d => ctx.is3D ? d.path.map(c => [c[0], c[1], SLAB + 40]) : d.path, getColor: [232, 196, 127, 255], getWidth: 2.2, widthUnits: "pixels", jointRounded: true, parameters: { depthCompare: ctx.is3D ? "less-equal" : "always" } }),
-    new TextLayer({ id: "vlbl", data: LABELS && !CITY ? D.viloyatlar.features : [], getPosition: f => [f.properties._lbl[0], f.properties._lbl[1], ctx.is3D ? vilHeight(f.properties, mx) + 6000 : 0], getText: f => f.properties.nomi.replace(" viloyati", "").replace(" Resp.", ""), getSize: 12.5, getColor: [233, 238, 242, 230], fontFamily: "IBM Plex Sans, sans-serif", fontWeight: 600, characterSet: "auto", fontSettings: { sdf: true }, outlineWidth: 3, outlineColor: [8, 17, 27, 220], parameters: { depthCompare: "always" }, updateTriggers: { getPosition: [EXT_METRIC, ctx.exag, ctx.is3D] } })
+    new TextLayer({ id: "vlbl", data: LABELS && !ZM() ? D.viloyatlar.features : [], getPosition: f => [f.properties._lbl[0], f.properties._lbl[1], ctx.is3D ? vilHeight(f.properties, mx) + 6000 : 0], getText: f => f.properties.nomi.replace(" viloyati", "").replace(" Resp.", ""), getSize: 12.5, getColor: [233, 238, 242, 230], fontFamily: "IBM Plex Sans, sans-serif", fontWeight: 600, characterSet: "auto", fontSettings: { sdf: true }, outlineWidth: 3, outlineColor: [8, 17, 27, 220], parameters: { depthCompare: "always" }, updateTriggers: { getPosition: [EXT_METRIC, ctx.exag, ctx.is3D] } })
   ]; } });
 /* ---------- tumanlar (geoBoundaries ADM2, 199 ta) ---------- */
 const TUM = D.tumanlar.fc, TUMETA = D.tumanlar.meta;
@@ -242,9 +242,9 @@ LAY.yol = addLayer("Avtomobil yöllari", D.yollar, { style: { fill: "#E9A24E", s
 let popMax = Math.max(...D.shaharlar.features.map(f => f.properties.aholi));
 LAY.sha = addLayer("Şaharlar", D.shaharlar, { style: { fill: "#F2D49B", stroke: "#F2D49B" }, build: ctx => {
   const h = f => baseH() + 160000 * ctx.exag * (RELIEF() ? .45 : 1) * Math.sqrt(f.properties.aholi / popMax), cz = f => pz(f.geometry.coordinates[0], f.geometry.coordinates[1]);
-  const base = ctx.is3D && !CITY ? [new ColumnLayer({ id: "sha3d", data: D.shaharlar.features, getPosition: f => [f.geometry.coordinates[0], f.geometry.coordinates[1], cz(f)], diskResolution: 24, radius: 6500, extruded: true, material: MAT, getElevation: h, getFillColor: f => f.properties.maqomi === "poytaxt" ? [255, 79, 139, 255] : [242, 212, 155, 255], pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 120], tipFn: f => ({ title: f.properties.nomi, props: { aholi: f.properties.aholi, maqomi: f.properties.maqomi, "balandlik, m (ETOPO1)": f.properties.balandlik_m } }), onPickTable: info => focusCity(info.object.properties.nomi), updateTriggers: { getElevation: [ctx.exag] } })]
+  const base = ctx.is3D && !ZM() ? [new ColumnLayer({ id: "sha3d", data: D.shaharlar.features, getPosition: f => [f.geometry.coordinates[0], f.geometry.coordinates[1], cz(f)], diskResolution: 24, radius: 6500, extruded: true, material: MAT, getElevation: h, getFillColor: f => f.properties.maqomi === "poytaxt" ? [255, 79, 139, 255] : [242, 212, 155, 255], pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 120], tipFn: f => ({ title: f.properties.nomi, props: { aholi: f.properties.aholi, maqomi: f.properties.maqomi, "balandlik, m (ETOPO1)": f.properties.balandlik_m } }), onPickTable: info => focusCity(info.object.properties.nomi), updateTriggers: { getElevation: [ctx.exag] } })]
     : [new ScatterplotLayer({ id: "sha2d", data: D.shaharlar.features, getPosition: f => ctx.is3D ? [f.geometry.coordinates[0], f.geometry.coordinates[1], zb(f.geometry.coordinates[0], f.geometry.coordinates[1]) + 80] : f.geometry.coordinates, onPickTable: info => focusCity(info.object.properties.nomi), updateTriggers: { getPosition: [ctx.is3D] }, getRadius: f => 2.5 + Math.sqrt(f.properties.aholi) / 230, radiusUnits: "pixels", getFillColor: f => f.properties.maqomi === "poytaxt" ? [255, 79, 139, 255] : [242, 212, 155, 255], getLineColor: [8, 17, 27, 255], stroked: true, lineWidthUnits: "pixels", getLineWidth: 1, pickable: true, tipFn: f => ({ title: f.properties.nomi, props: { aholi: f.properties.aholi, maqomi: f.properties.maqomi } }), parameters: { depthCompare: "always" } })];
-  if (LABELS && !CITY) base.push(new TextLayer({ id: "shalbl", data: D.shaharlar.features.filter(f => f.properties.aholi >= 200000), getPosition: f => [f.geometry.coordinates[0], f.geometry.coordinates[1], ctx.is3D ? cz(f) + h(f) + 4000 : 0], getText: f => f.properties.nomi, getSize: 11.5, getPixelOffset: ctx.is3D ? [0, -8] : [0, -12], getColor: [242, 212, 155, 255], fontFamily: "IBM Plex Sans, sans-serif", fontWeight: 500, characterSet: "auto", fontSettings: { sdf: true }, outlineWidth: 3, outlineColor: [8, 17, 27, 230], parameters: { depthCompare: "always" }, updateTriggers: { getPosition: [ctx.exag, ctx.is3D] } }));
+  if (LABELS && !ZM()) base.push(new TextLayer({ id: "shalbl", data: D.shaharlar.features.filter(f => f.properties.aholi >= 200000), getPosition: f => [f.geometry.coordinates[0], f.geometry.coordinates[1], ctx.is3D ? cz(f) + h(f) + 4000 : 0], getText: f => f.properties.nomi, getSize: 11.5, getPixelOffset: ctx.is3D ? [0, -8] : [0, -12], getColor: [242, 212, 155, 255], fontFamily: "IBM Plex Sans, sans-serif", fontWeight: 500, characterSet: "auto", fontSettings: { sdf: true }, outlineWidth: 3, outlineColor: [8, 17, 27, 230], parameters: { depthCompare: "always" }, updateTriggers: { getPosition: [ctx.exag, ctx.is3D] } }));
   return base; } });
 $("#lblToggle").addEventListener("change", e => { LABELS = e.target.checked; redraw(); });
 $("#extMetric").addEventListener("change", e => { EXT_METRIC = e.target.value; if (EXT_METRIC === "mcda" && !RES) toast("Avval MCDA tahlilini bajaring"); if (CITY && EXT_METRIC === "relyef") toast("Relyef modeli butun mamlakat körinişida işlaydi"); if (!IS3D && EXT_METRIC !== "plita") set3D(true); if (EXT_METRIC === "relyef") setView({ pitch: Math.max(VS.pitch, 55) }, 900); exagLbl(); redraw(); legendExt(); });
@@ -1409,3 +1409,189 @@ $("#sRun").addEventListener("click", async () => {
   await busy(false); $("#sRun").disabled = false;
 });
 sohaUI();
+
+/* =====================================================================
+   KÖÇA XARITASI + JOY TANLAŞ (masalan, yangi maktab uçun aniq oriyentir)
+   • Fon: Esri / OpenStreetMap plitkalari (köça nomlari, uy raqamlari)
+   • Nuqta tanlanganda: Nominatim (manzil) + Overpass (atrofdagi binolar,
+     yöllar, kasalxona, maktab, bekat, sanoat) → masofalar va mezonlar
+   ===================================================================== */
+const BM = {
+  // CARTO plitkalari endi API kalit talab qiladi ("API KEY REQUIRED") — kalitsiz Esri plitkalari ishlatiladi
+  tungi: { nomi: "Tungi (Esri Dark Gray)", url: ["https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"], maxZ: 16, attr: "© Esri, HERE, Garmin, © OpenStreetMap hissadorlari" },
+  yorug: { nomi: "Yorug‘ (Esri Street Map)", url: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"], maxZ: 19, attr: "© Esri, HERE, Garmin, © OpenStreetMap hissadorlari" },
+  osm: { nomi: "Batafsil (OpenStreetMap)", url: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], maxZ: 19, attr: "© OpenStreetMap hissadorlari" }
+};
+window.__BM = (() => { try { return localStorage.getItem("ol_bm") || "tungi"; } catch (e) { return "tungi"; } })();
+const BM_MINZ = 9;
+window.__ZOOMED = false;
+function zoomHook() {
+  const z = VS.zoom, zoomed = z >= 10.3 ? true : z < 9.6 ? false : window.__ZOOMED, show = z >= BM_MINZ;
+  let ch = false;
+  if (zoomed !== window.__ZOOMED) { window.__ZOOMED = zoomed; if (!CITY) SLAB = zoomed ? 300 : 9000; ch = true; }
+  if (show !== window.__BMSHOW) { window.__BMSHOW = show; ch = true; const a = $("#bmAttr"); if (a) a.style.display = show && LAY.bm && LAY.bm.visible ? "" : "none"; }
+  const fine = z >= 12; if (fine !== window.__FINE) { window.__FINE = fine; ch = true; }
+  if (ch) redraw();
+}
+// 1:10M Natural Earth yöl/daryo/köllari köça darajasida noaniq — 12-zumdan keyin yaşiriladi (fondagi aniq xarita körinadi)
+[LAY.yol, LAY.dar, LAY.kol].forEach(l => { if (!l || !l.build) return; const b = l.build; l.build = ctx => VS.zoom >= 12 && window.__BMSHOW && LAY.bm && LAY.bm.visible ? [] : b(ctx); });
+const zTop = ctx => ctx.is3D && !RELIEF() ? baseH() : 0;
+LAY.bm = addLayer("Köça xaritasi (fon)", null, { kind: "raster", note: "Esri / OpenStreetMap plitkalari · 9-zumdan körinadi", build: ctx => {
+  if (!window.__BMSHOW) return [];
+  const b = BM[window.__BM] || BM.tungi, zt = zTop(ctx) + 4;
+  return [new TileLayer({ id: "bm-" + window.__BM, data: b.url, minZoom: 0, maxZoom: b.maxZ || 19, tileSize: 256, maxRequests: 8, refinementStrategy: "best-available",
+    renderSubLayers: p => { const { west, south, east, north } = p.tile.bbox; return new BitmapLayer(p, { data: null, image: p.data, bounds: [[west, south, zt], [west, north, zt], [east, north, zt], [east, south, zt]], opacity: .97, parameters: { depthCompare: "always", depthWriteEnabled: false } }); } })];
+} });
+(() => { const i = LAYERS.indexOf(LAY.bm), v = LAYERS.indexOf(LAY.vil); if (i > -1 && v > -1) { LAYERS.splice(i, 1); LAYERS.splice(v + 1, 0, LAY.bm); renderLayers(); } })();
+(() => { const a = document.createElement("div"); a.id = "bmAttr"; a.style.cssText = "position:absolute;right:10px;bottom:4px;z-index:5;font:11px/1.3 Inter,sans-serif;color:#cfd8e3;background:rgba(10,18,30,.6);padding:2px 6px;border-radius:4px;pointer-events:none;display:none"; a.textContent = BM[window.__BM].attr; $("#map").appendChild(a); })();
+
+/* ---------- joy tahlili ---------- */
+const JOY = { pick: false, last: null };
+const JOY_TUR = {
+  maktab: { nomi: "Maktab", mez: [
+    ["bino", "Nuqta mavjud bino içida emas", null, "yöq"],
+    ["magistral", "Katta (magistral) yöldan uzoqlik", 50, ">="],
+    ["yol", "Kirish yöligaça", 300, "<="],
+    ["tib", "Eng yaqin tibbiyot muassasasigaça", 1000, "<="],
+    ["mak", "Mavjud maktabdan uzoqlik", 500, ">="],
+    ["san", "Sanoat obyektidan uzoqlik", 500, ">="],
+    ["temir", "Temir yöldan uzoqlik", 100, ">="],
+    ["bekat", "Jamoat transporti bekatigaça", 500, "<="]] },
+  bogcha: { nomi: "Bolalar bog‘çasi", mez: [
+    ["bino", "Nuqta mavjud bino içida emas", null, "yöq"],
+    ["magistral", "Katta (magistral) yöldan uzoqlik", 50, ">="],
+    ["yol", "Kirish yöligaça", 200, "<="],
+    ["tib", "Eng yaqin tibbiyot muassasasigaça", 1000, "<="],
+    ["bog", "Mavjud bog‘çadan uzoqlik", 300, ">="],
+    ["san", "Sanoat obyektidan uzoqlik", 500, ">="],
+    ["temir", "Temir yöldan uzoqlik", 100, ">="]] },
+  klinika: { nomi: "Poliklinika", mez: [
+    ["bino", "Nuqta mavjud bino içida emas", null, "yöq"],
+    ["yol", "Kirish yöligaça", 100, "<="],
+    ["tib", "Mavjud tibbiyot muassasasidan uzoqlik", 1000, ">="],
+    ["san", "Sanoat obyektidan uzoqlik", 300, ">="],
+    ["bekat", "Jamoat transporti bekatigaça", 300, "<="]] }
+};
+const MAJOR = /^(motorway|trunk|primary|secondary)(_link)?$/;
+const HWN = { motorway: "avtomagistral", trunk: "magistral", primary: "asosiy köça", secondary: "ikkinçi darajali köça", tertiary: "uçinçi darajali köça", unclassified: "mahalliy yöl", residential: "turar-joy köçasi", living_street: "turar-joy köçasi", service: "xizmat yöli", motorway_link: "magistral çiqişi", trunk_link: "magistral çiqişi", primary_link: "asosiy köça çiqişi", secondary_link: "köça çiqişi" };
+const yon = b => RUMB[Math.round(((b % 360) + 360) % 360 / 45) % 8];
+const mFmt = km => km < 1 ? Math.round(km * 1000) + " m" : fmt(km, 2) + " km";
+const objName = p => p.name || p["name:uz"] || p["name:ru"] || "";
+const addrOf = p => [p["addr:street"], p["addr:housenumber"]].filter(Boolean).join(", ");
+function parseLL(s) { const m = String(s).match(/(-?\d+(?:[.,]\d+)?)\s*[,; ]\s*(-?\d+(?:[.,]\d+)?)/); if (!m) return null; let a = +m[1].replace(",", "."), b = +m[2].replace(",", "."); if (a > 50 && b < 50) [a, b] = [b, a]; return { lat: a, lon: b }; }
+async function nomin(lat, lon) {
+  try { const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&accept-language=uz,ru`, { signal: AbortSignal.timeout(15000) }); return r.ok ? await r.json() : null; } catch (e) { return null; }
+}
+async function joyFetch(lat, lon) {
+  const L = `${lat.toFixed(6)},${lon.toFixed(6)}`;
+  const q = `[out:json][timeout:40];(nwr(around:2000,${L})["amenity"~"^(hospital|clinic|doctors|pharmacy|school|kindergarten|college|university)$"];nwr(around:2000,${L})["healthcare"~"^(hospital|clinic|centre|doctor)$"];node(around:1000,${L})["highway"="bus_stop"];node(around:1000,${L})["public_transport"="platform"];nwr(around:2000,${L})["landuse"="industrial"];nwr(around:2000,${L})["man_made"="works"];)->.p;.p out center tags;(way(around:700,${L})["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)(_link)?$"];way(around:1200,${L})["railway"="rail"];way(around:300,${L})["building"];)->.g;.g out geom;is_in(${L})->.a;area.a["name"]["admin_level"]->.ad;.ad out tags;`;
+  const j = await overpassRaw(q, "Atrofdagi obyektlar olinmoqda");
+  return { fc: osm2fc(j), areas: (j.elements || []).filter(e => e.type === "area").map(e => e.tags || {}) };
+}
+async function joyAnalyze(lat, lon) {
+  if (!(lat > 34 && lat < 48 && lon > 54 && lon < 77)) return toast("Nuqta Özbekiston hududidan taşqarida");
+  const tur = $("#jTur").value, T = JOY_TUR[tur], pt = turf.point([lon, lat]);
+  { const zz = Math.max(VS.zoom, 16.3); setView({ longitude: lon, latitude: lat - (MOB() ? .0016 : .0011) * Math.pow(2, 16.3 - zz), zoom: zz, pitch: IS3D ? 50 : 0 }, 900); }
+  await busy(true, "Joy tahlil qilinmoqda…");
+  try {
+    const [o, nm] = await Promise.all([joyFetch(lat, lon), nomin(lat, lon)]);
+    const fs = o.fc.features, P = f => f.properties || {};
+    const ptOf = f => f.geometry.type === "Point" ? f : turf.pointOnFeature(f);
+    const near = (arr, fn) => arr.map(f => { const d = fn(f); return { f, d, p: P(f), b: turf.bearing(pt, d.at || ptOf(f)) }; }).sort((a, b) => a.d.km - b.d.km);
+    const toPt = f => ({ km: turf.distance(pt, ptOf(f)), at: ptOf(f) });
+    const toLine = f => { const n = turf.nearestPointOnLine(f, pt); return { km: n.properties.dist, at: n }; };
+    const toPoly = f => { if (safe(() => turf.booleanPointInPolygon(pt, f))) return { km: 0, at: pt, inside: true }; const ls = turf.polygonToLine(f), ln = ls.type === "FeatureCollection" ? ls.features[0] : ls, n = turf.nearestPointOnLine(ln, pt); return { km: n.properties.dist, at: n }; };
+    const isAm = (f, re) => re.test(P(f).amenity || "") || (re.source.includes("hospital") && /^(hospital|clinic|centre|doctor)$/.test(P(f).healthcare || ""));
+    const roads = near(fs.filter(f => P(f).highway && /Line/.test(f.geometry.type)), toLine);
+    const major = roads.filter(r => MAJOR.test(r.p.highway));
+    const rail = near(fs.filter(f => P(f).railway === "rail"), toLine);
+    const blds = near(fs.filter(f => P(f).building && isPoly(f)), toPoly);
+    const tib = near(fs.filter(f => isAm(f, /^(hospital|clinic|doctors)$/)), toPt);
+    const mak = near(fs.filter(f => /^(school)$/.test(P(f).amenity || "")), toPt);
+    const bog = near(fs.filter(f => P(f).amenity === "kindergarten"), toPt);
+    const bekat = near(fs.filter(f => P(f).highway === "bus_stop" || P(f).public_transport === "platform"), toPt);
+    const san = near(fs.filter(f => P(f).landuse === "industrial" || P(f).man_made === "works"), toPt);
+    const inside = blds.find(b => b.d.inside);
+    const val = { bino: inside ? 0 : 1, magistral: major[0] ? major[0].d.km * 1000 : null, yol: roads[0] ? roads[0].d.km * 1000 : null, tib: tib[0] ? tib[0].d.km * 1000 : null, mak: mak[0] ? mak[0].d.km * 1000 : null, bog: bog[0] ? bog[0].d.km * 1000 : null, san: san[0] ? san[0].d.km * 1000 : null, temir: rail[0] ? rail[0].d.km * 1000 : null, bekat: bekat[0] ? bekat[0].d.km * 1000 : null };
+    const thr = Object.fromEntries([...document.querySelectorAll("#jMez input[data-k]")].map(i => [i.dataset.k, +i.value]));
+    const rows = T.mez.map(([k, txt, def, op]) => { const v = val[k], t = thr[k] ?? def; let ok, show;
+      if (op === "yöq") { ok = v === 1; show = ok ? "bino yöq" : "bino içida: " + (objName(inside.p) || addrOf(inside.p) || "bino"); }
+      else if (v == null) { ok = op === ">="; show = op === ">=" ? "atrofda (≤ 2 km) topilmadi" : "atrofda topilmadi"; }
+      else { ok = op === ">=" ? v >= t : v <= t; show = Math.round(v) + " m"; }
+      return { k, txt, op, t, ok, show }; });
+    const okN = rows.filter(r => r.ok).length;
+    const a = nm && nm.address || {}, area = o.areas.slice().sort((x, y) => (+y.admin_level || 0) - (+x.admin_level || 0));
+    const mahalla = a.neighbourhood || a.quarter || (area.find(x => +x.admin_level >= 8) || {}).name || "";
+    const tuman = a.city_district || a.suburb || a.county || (area.find(x => +x.admin_level === 6) || {}).name || "";
+    const manzil = [a.road, a.house_number].filter(Boolean).join(", ") || (nm && nm.name) || "";
+    const shahar = a.city || a.town || a.village || a.state || "";
+    // xaritaga
+    const LN = [], LB = [], PTS = [];
+    const link = (r, col, label) => { if (!r) return; const to = r.d.at.geometry.coordinates; LN.push({ path: [[lon, lat], to], col }); LB.push({ p: [(lon + to[0]) / 2, (lat + to[1]) / 2], t: label + " · " + mFmt(r.d.km), col }); PTS.push({ p: to, col }); };
+    link(roads[0], [233, 162, 78], "yöl");
+    if (major[0] && major[0] !== roads[0]) link(major[0], [255, 120, 60], "magistral");
+    link(tib[0], [255, 79, 139], objName(tib[0] && tib[0].p) || "tibbiyot");
+    link(mak[0], [91, 184, 255], objName(mak[0] && mak[0].p) || "maktab");
+    if (tur !== "klinika") link(bog[0], [126, 211, 33], objName(bog[0] && bog[0].p) || "bog‘ça");
+    link(bekat[0], [247, 209, 84], objName(bekat[0] && bekat[0].p) || "bekat");
+    if (blds[0] && !inside) link(blds[0], [220, 226, 235], addrOf(blds[0].p) || objName(blds[0].p) || "bino");
+    const rings = [250, 500, 1000].map(m => ({ path: turf.circle([lon, lat], m / 1000, { steps: 72, units: "kilometers" }).geometry.coordinates[0], m }));
+    const POI = [...tib.slice(0, 8).map(r => ({ r, c: [255, 79, 139] })), ...mak.slice(0, 8).map(r => ({ r, c: [91, 184, 255] })), ...bog.slice(0, 6).map(r => ({ r, c: [126, 211, 33] })), ...bekat.slice(0, 6).map(r => ({ r, c: [247, 209, 84] }))].map(({ r, c }) => ({ p: ptOf(r.f).geometry.coordinates, c, t: objName(r.p) }));
+    const BL = blds.slice(0, 600).map(r => ({ poly: r.f.geometry.type === "Polygon" ? r.f.geometry.coordinates : r.f.geometry.coordinates[0], h: (+r.p["building:levels"] || 0) * 3.2 || +String(r.p.height || "").replace(/[^\d.]/g, "") || 6, top: r === blds[0] || r.d.inside, p: r.p }));
+    LAYERS.filter(l => l._joy).forEach(l => removeLayer(l.id));
+    const lay = addLayer(`Joy tahlili · ${lat.toFixed(5)}, ${lon.toFixed(5)}`, null, { kind: "raster", derived: true, note: `${T.nomi} uçun · ${okN}/${rows.length} mezon`, bbox: turf.bbox(turf.circle([lon, lat], 1, { units: "kilometers" })), build: ctx => { const z = zTop(ctx), Z = c => [c[0], c[1], z + 8];
+      return [
+        new SolidPolygonLayer({ id: "jbld", data: BL, getPolygon: d => d.poly.map(r => r.map(c => [c[0], c[1], z])), extruded: ctx.is3D, getElevation: d => d.h, getFillColor: d => d.top ? [242, 184, 75, 235] : [150, 168, 190, 200], getLineColor: [20, 30, 45], material: MAT, pickable: true, tipFn: d => ({ title: objName(d.p) || "Bino", props: { manzil: addrOf(d.p) || "—", qavatlar: d.p["building:levels"] || "—", turi: d.p.building } }), parameters: { depthCompare: "less-equal" } }),
+        new PathLayer({ id: "jring", data: rings, getPath: d => d.path.map(Z), getColor: [255, 255, 255, 110], getWidth: 1.5, widthUnits: "pixels", getDashArray: [6, 4], parameters: { depthCompare: "always" } }),
+        new TextLayer({ id: "jringt", data: rings, getPosition: d => Z(d.path[0]), getText: d => d.m + " m", getSize: 12, getColor: [230, 236, 242], characterSet: "auto", getPixelOffset: [0, -8], parameters: { depthCompare: "always" } }),
+        new PathLayer({ id: "jln", data: LN, getPath: d => d.path.map(Z), getColor: d => [...d.col, 240], getWidth: 3, widthUnits: "pixels", parameters: { depthCompare: "always" } }),
+        new ScatterplotLayer({ id: "jpoi", data: POI, getPosition: d => Z(d.p), getRadius: 5, radiusUnits: "pixels", getFillColor: d => [...d.c, 230], getLineColor: [10, 20, 35], lineWidthMinPixels: 1, stroked: true, pickable: true, tipFn: d => ({ title: d.t || "obyekt", props: {} }), parameters: { depthCompare: "always" } }),
+        new ScatterplotLayer({ id: "jend", data: PTS, getPosition: d => Z(d.p), getRadius: 4, radiusUnits: "pixels", getFillColor: d => [...d.col, 255], parameters: { depthCompare: "always" } }),
+        new ScatterplotLayer({ id: "jpin", data: [{ p: [lon, lat] }], getPosition: d => Z(d.p), getRadius: 9, radiusUnits: "pixels", getFillColor: [255, 79, 139], getLineColor: [255, 255, 255], lineWidthMinPixels: 3, stroked: true, parameters: { depthCompare: "always" } }),
+        new TextLayer({ id: "jlb", data: LB, getPosition: d => Z(d.p), getText: d => d.t, getSize: 13, getColor: [255, 255, 255], background: true, getBackgroundColor: [10, 20, 34, 215], backgroundPadding: [5, 3], getBorderColor: d => [...d.col, 255], getBorderWidth: 1, characterSet: "auto", fontFamily: "Inter, Arial, sans-serif", parameters: { depthCompare: "always" } })
+      ]; } });
+    lay._joy = true;
+    const li = (arr, n, f) => arr.length ? arr.slice(0, n).map(f).join("") : `<li class="muted">2 km ichida topilmadi</li>`;
+    const pl = r => `<li><b>${esc(objName(r.p) || "nomsiz")}</b> — ${mFmt(r.d.km)}, ${yon(r.b)}da${addrOf(r.p) ? ` · <span class="muted">${esc(addrOf(r.p))}</span>` : ""}</li>`;
+    const cp = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+    const html = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px;align-items:start">
+      <div style="min-width:0">
+        <div class="kpis"><div class="kpi"><b class="num">${okN}/${rows.length}</b><span>${esc(T.nomi)} uçun mezon bajarildi</span></div></div>
+        <p style="margin:6px 0 2px"><b>${esc(manzil || "Manzil topilmadi")}</b></p>
+        <p class="small muted" style="margin:0">${esc([mahalla && mahalla + (/(mahalla|МФЙ|махалл)/i.test(mahalla) ? "" : " mahallasi"), tuman, shahar].filter(Boolean).join(" · "))}</p>
+        <p class="small" style="margin:6px 0"><span class="num">${cp}</span> <button class="btn" type="button" id="jCopy" style="padding:2px 8px">nusxa</button>
+          <a href="https://yandex.uz/maps/?pt=${lon},${lat}&z=17&l=map" target="_blank" rel="noopener">Yandex</a> · <a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" rel="noopener">Google</a> · <a href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=18/${lat}/${lon}" target="_blank" rel="noopener">OSM</a></p>
+        <table class="t" style="width:100%">${rows.map(r => `<tr><td>${r.ok ? "✅" : "❌"} ${esc(r.txt)}${r.t != null && r.op !== "yöq" ? ` <span class="muted">(${r.op === ">=" ? "≥" : "≤"} ${r.t} m)</span>` : ""}</td><td class="r num">${esc(r.show)}</td></tr>`).join("")}</table>
+      </div>
+      <div class="small" style="min-width:0">
+        <h3>Oriyentirlar</h3>
+        <ul style="margin:0 0 8px;padding-left:18px">
+          ${inside ? `<li style="color:var(--warn)">⚠ Nuqta bino içida: <b>${esc(objName(inside.p) || addrOf(inside.p) || inside.p.building)}</b></li>` : ""}
+          ${blds.filter(b => !b.d.inside).slice(0, 3).map(b => `<li>Bino: <b>${esc(addrOf(b.p) || objName(b.p) || "manzilsiz bino")}</b> — ${mFmt(b.d.km)}, ${yon(b.b)}da${b.p["building:levels"] ? `, ${b.p["building:levels"]} qavat` : ""}</li>`).join("")}
+          ${roads[0] ? `<li>Eng yaqin yöl: <b>${esc(objName(roads[0].p) || "nomsiz")}</b> (${esc(HWN[roads[0].p.highway] || roads[0].p.highway)}) — ${mFmt(roads[0].d.km)}</li>` : ""}
+          ${major[0] ? `<li>Katta yöl: <b>${esc(objName(major[0].p) || HWN[major[0].p.highway])}</b> — ${mFmt(major[0].d.km)}, ${yon(major[0].b)}da</li>` : ""}
+          ${rail[0] ? `<li>Temir yöl — ${mFmt(rail[0].d.km)}</li>` : ""}
+        </ul>
+        <h3>Tibbiyot</h3><ul style="margin:0 0 8px;padding-left:18px">${li(tib, 3, pl)}</ul>
+        <h3>Maktablar</h3><ul style="margin:0 0 8px;padding-left:18px">${li(mak, 3, pl)}</ul>
+        <h3>Bog‘çalar</h3><ul style="margin:0 0 8px;padding-left:18px">${li(bog, 2, pl)}</ul>
+        <h3>Bekat va sanoat</h3><ul style="margin:0;padding-left:18px">${li(bekat, 2, pl)}${san[0] ? `<li>Sanoat: <b>${esc(objName(san[0].p) || "sanoat hududi")}</b> — ${mFmt(san[0].d.km)}</li>` : ""}</ul>
+      </div></div>
+      <p class="small muted">Masofalar — töğri çiziq böyiça. Manba: OpenStreetMap (Overpass, Nominatim). OSM'da çizilmagan bino yoki muassasa hisobga kirmaydi. Mezon qiymatlarini amaldagi şaharsozlik normalariga qarab özgartiring.</p>`;
+    const csv = toCsv(["mezon", "qiymat", "chegara", "natija"], rows.map(r => [r.txt, r.show, r.t ?? "", r.ok ? "bajarildi" : "bajarilmadi"]));
+    setDrawer(`${T.nomi} uçun joy · ${manzil || cp}`, `${okN}/${rows.length} mezon · ${mahalla || tuman || shahar}`, html, ["joy_" + slug(manzil || cp) + ".csv", csv], () => { const b = $("#jCopy"); if (b) b.onclick = () => { try { navigator.clipboard.writeText(cp); toast("Koordinata nusxalandi"); } catch (e) { } }; });
+    DRAWER.bind && DRAWER.bind();
+    JOY.last = { lat, lon }; $("#jLL").value = cp;
+  } catch (er) { console.error(er); toast(er.message || String(er)); sLog(`<span style="color:var(--bad)">✕ ${esc(er.message || er)}</span>`); }
+  await busy(false);
+}
+function joyMez() { const T = JOY_TUR[$("#jTur").value]; $("#jMez").innerHTML = T.mez.filter(m => m[2] != null).map(([k, t, d, op]) => `<label class="f">${esc(t)} ${op === ">=" ? "≥" : "≤"}, m<input type="number" data-k="${k}" value="${d}" min="0" step="10"></label>`).join(""); }
+function joyPickMode(on) { JOY.pick = on; $("#jPick").classList.toggle("primary", on); $("#jPick").textContent = on ? "Xaritani bosing… (bekor qiliş)" : "📍 Xaritadan tanlaş"; $("#map").style.cursor = on ? "crosshair" : ""; window.__pick = on ? info => { const [lon, lat] = info.coordinate; joyAnalyze(lat, lon); } : null; }
+$("#jTur").addEventListener("change", joyMez); joyMez();
+$("#jPick").addEventListener("click", () => joyPickMode(!JOY.pick));
+$("#jGo").addEventListener("click", () => { const c = parseLL($("#jLL").value); if (!c) return toast("Koordinatani “41.340815, 69.286411” körinişida kiriting"); joyAnalyze(c.lat, c.lon); });
+$("#jLL").addEventListener("keydown", e => { if (e.key === "Enter") $("#jGo").click(); });
+$("#jGeo").addEventListener("click", () => { if (!navigator.geolocation) return toast("Brauzer joylaşuvni bermaydi"); navigator.geolocation.getCurrentPosition(p => joyAnalyze(p.coords.latitude, p.coords.longitude), e => toast("Joylaşuv olinmadi: " + e.message), { enableHighAccuracy: true, timeout: 15000 }); });
+$("#jBm").innerHTML = Object.entries(BM).map(([k, b]) => `<option value="${k}"${k === window.__BM ? " selected" : ""}>${esc(b.nomi)}</option>`).join("");
+$("#jBm").addEventListener("change", e => { window.__BM = e.target.value; try { localStorage.setItem("ol_bm", window.__BM); } catch (er) { } $("#bmAttr").textContent = BM[window.__BM].attr; LAY.bm.visible = true; renderLayers(); redraw(); });
+zoomHook();
