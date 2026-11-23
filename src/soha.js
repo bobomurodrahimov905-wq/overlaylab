@@ -73,6 +73,16 @@ const OSMT = {
 async function osmGet(keys, bb) {
   const ck = k => k + "|" + bb.map(x => x.toFixed(3)).join(","), need = keys.filter(k => !SOHA.cache[ck(k)]);
   if (need.length) {
+    // 1) asosiy manba — OpenFreeMap vektor plitkalari (tez, keşlanadi)
+    try {
+      const t0 = Date.now(), layers = [...new Set(need.flatMap(k => VT_LAYERS[k] || []))];
+      const rp = SOHA.poly && turf.bbox(SOHA.poly).every((v, i) => Math.abs(v - bb[i]) < 1e-9) ? SOHA.poly : null;
+      const fc = await vtFeatures(bb, layers, { poly: rp, onProgress: (d, n) => sLog(`OpenStreetMap: xarita plitkalari ${d}/${n} (${Math.round((Date.now() - t0) / 1000)} s)…`) });
+      need.forEach(k => { SOHA.cache[ck(k)] = { type: "FeatureCollection", features: fc.features.filter(f => (VT_LAYERS[k] || []).length && OSMT[k](f.properties || {})).map(f => OSMQ[k][1] === "center" && f.geometry.type !== "Point" ? turf.feature(turf.pointOnFeature(f).geometry, f.properties) : f) }; });
+      sLog(`OpenStreetMap: ${fc.features.length} obyekt, ${fc.tiles} plitka (${((Date.now() - t0) / 1000).toFixed(1)} s). Hisoblanmoqda…`); await sleep(20);
+      return keys.map(k => SOHA.cache[ck(k)]);
+    } catch (e) { console.warn("Vektor plitkalar:", e); sLog("Xarita plitkalari olinmadi, Overpass serveriga ötilmoqda…"); }
+    // 2) zaxira — Overpass API
     const b = `${bb[1].toFixed(4)},${bb[0].toFixed(4)},${bb[3].toFixed(4)},${bb[2].toFixed(4)}`;
     const P = need.filter(k => OSMQ[k][1] === "center").map(k => OSMQ[k][0]).join(""), Gq = need.filter(k => OSMQ[k][1] === "geom").map(k => OSMQ[k][0]).join("");
     const q = `[out:json][timeout:60][maxsize:200000000];${P ? `(${P})->.p;.p out center;` : ""}${Gq ? `(${Gq})->.g;.g out geom;` : ""}`.replace(/BB/g, b);
@@ -86,20 +96,26 @@ async function osmGet(keys, bb) {
   return keys.map(k => SOHA.cache[ck(k)]);
 }
 async function quakes(bb) {
-  const k = "usgs"; if (SOHA.cache[k]) return SOHA.cache[k];
-  const u = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=1960-01-01&minmagnitude=4&minlatitude=34&maxlatitude=48&minlongitude=54&maxlongitude=77&orderby=magnitude&limit=20000`;
-  const r = await fetch(u, { signal: AbortSignal.timeout(40000) }).catch(e => { throw new Error("USGS zilzila katalogi 40 s ichida javob bermadi"); }); if (!r.ok) throw new Error("USGS zilzila katalogi javob bermadi (HTTP " + r.status + ")");
-  const j = await r.json(); SOHA.cache[k] = j; return j;
+  // faqat hudud atrofidagi (±1.5°) zilzilalar — butun mintaqa 9 MB, bu esa ~0.5 MB
+  const B = [Math.max(54, bb[0] - 1.5), Math.max(34, bb[1] - 1.5), Math.min(77, bb[2] + 1.5), Math.min(48, bb[3] + 1.5)].map(v => +v.toFixed(1)), k = "usgs|" + B.join(",");
+  if (SOHA.cache[k]) return SOHA.cache[k];
+  const c = await idbGet("kv", k); if (c && Date.now() - c.t < 30 * 864e5) return (SOHA.cache[k] = c.j);
+  const u = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=1960-01-01&minmagnitude=4&minlatitude=${B[1]}&maxlatitude=${B[3]}&minlongitude=${B[0]}&maxlongitude=${B[2]}&orderby=magnitude&limit=20000`;
+  let r; try { r = await fetchT(u, 60000); } catch (e) { if (c) return (SOHA.cache[k] = c.j); throw new Error("USGS zilzila katalogi 60 s ichida javob bermadi"); }
+  if (!r.ok) { if (c) return (SOHA.cache[k] = c.j); throw new Error("USGS zilzila katalogi javob bermadi (HTTP " + r.status + ")"); }
+  const j0 = await r.json(), j = { type: "FeatureCollection", features: (j0.features || []).map(f => ({ type: "Feature", geometry: f.geometry, properties: { mag: f.properties.mag, place: f.properties.place, time: f.properties.time } })) };
+  SOHA.cache[k] = j; idbPut("kv", k, { j, t: Date.now() }); return j;
 }
 async function windRose(lon, lat) {
   const k = "wind|" + lon.toFixed(1) + "," + lat.toFixed(1); if (SOHA.cache[k]) return SOHA.cache[k];
+  { const c = await idbGet("kv", k); if (c && Date.now() - c.t < 30 * 864e5) return (SOHA.cache[k] = c.j); }
   const e = new Date(Date.now() - 6 * 864e5), s = new Date(e.getTime() - 365 * 864e5), d = x => x.toISOString().slice(0, 10);
   const u = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&start_date=${d(s)}&end_date=${d(e)}&daily=wind_direction_10m_dominant,wind_speed_10m_max&timezone=Asia%2FTashkent`;
   const r = await fetch(u, { signal: AbortSignal.timeout(40000) }).catch(e => { throw new Error("Open-Meteo 40 s ichida javob bermadi"); }); if (!r.ok) throw new Error("Open-Meteo shamol arxivi javob bermadi (HTTP " + r.status + ")");
   const j = await r.json(), dir = j.daily.wind_direction_10m_dominant, sp = j.daily.wind_speed_10m_max;
   const f = new Array(8).fill(0), v = new Array(8).fill(0); let n = 0;
   dir.forEach((a, i) => { if (a == null) return; const sct = Math.round(a / 45) % 8; f[sct]++; v[sct] += sp[i] || 0; n++; });
-  const out = { f: f.map(x => x / Math.max(1, n)), v: v.map((x, i) => f[i] ? x / f[i] : 0), n, dan: d(s), gacha: d(e) }; SOHA.cache[k] = out; return out;
+  const out = { f: f.map(x => x / Math.max(1, n)), v: v.map((x, i) => f[i] ? x / f[i] : 0), n, dan: d(s), gacha: d(e) }; SOHA.cache[k] = out; idbPut("kv", k, { j: out, t: Date.now() }); return out;
 }
 const RUMB = ["şimol", "şimoli-şarq", "şarq", "janubi-şarq", "janub", "janubi-ğarb", "ğarb", "şimoli-ğarb"];
 
@@ -196,7 +212,13 @@ async function sohaShahar(reg, opt) {
   const lay = sohaCells(`Xizmatlarga yaqinlik · ${reg.nomi}`, G, sc, d => [...C3[Math.round(d.v * 3)], 235], d => ({ title: ["Heç biriga yaqin emas", "Bittasiga yaqin", "Ikkitasiga yaqin", "Uçalasiga yaqin"][Math.round(d.v * 3)], props: { "maktabgaça, km": dS[d.k] < 1e8 ? dS[d.k].toFixed(2) : "—", "tibbiyotgaça, km": dC[d.k] < 1e8 ? dC[d.k].toFixed(2) : "—", "yölgaça, km": dR[d.k] < 1e8 ? dR[d.k].toFixed(2) : "—" } }), "Turar joylarning maktab, poliklinika va yöllarga yaqinligi");
   addLayer(`Maktab va bog‘çalar · ${reg.nomi}`, fcOf(schools.map(f => turf.feature(f.geometry, { nomi: nm(f.properties), turi: f.properties.amenity }))), { derived: true, style: { stroke: "#0B2545", fill: "#5BB8FF" }, pointStyle: ptStyle(5) });
   addLayer(`Tibbiyot muassasalari · ${reg.nomi}`, fcOf(clinics.map(f => turf.feature(f.geometry, { nomi: nm(f.properties), turi: f.properties.amenity || f.properties.healthcare }))), { derived: true, style: { stroke: "#0B2545", fill: "#FF4F8B" }, pointStyle: ptStyle(6) });
-  const per = res.slice(0, 3000).map(f => { let a = 0, n = 0; const b = turf.bbox(f), m = rasterize([f], "fill", G); for (let k = 0; k < G.n; k++) if (m[k] && sc[k] >= 0) { a += sc[k]; n++; } return { nomi: nm(f.properties), s: n ? a / n : null, ga: turf.area(f) / 1e4 }; }).filter(r => r.s != null).sort((a, b) => a.s - b.s);
+  // har bir mahalla bali: faqat uning bbox'idagi kataklar tekshiriladi (butun hududni qayta çizmasdan — ~10x tez)
+  const per = res.slice(0, 3000).map(f => { let a = 0, n = 0; const b = turf.bbox(f);
+    const [xa, ya] = merc(b[0], b[3]), [xb, yb] = merc(b[2], b[1]);
+    const j0 = Math.max(0, Math.floor((xa - G.x0) / G.cs)), j1 = Math.min(G.W - 1, Math.floor((xb - G.x0) / G.cs)), i0 = Math.max(0, Math.floor((G.y0 - ya) / G.cs)), i1 = Math.min(G.H - 1, Math.floor((G.y0 - yb) / G.cs));
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const k = i * G.W + j; if (sc[k] >= 0 && safe(() => turf.booleanPointInPolygon([G.lon[j], G.lat[i]], f))) { a += sc[k]; n++; } }
+    if (!n) { const c = safe(() => turf.pointOnFeature(f).geometry.coordinates), k = c ? cellAt(G, c[0], c[1]) : -1; if (k >= 0 && sc[k] >= 0) { a = sc[k]; n = 1; } }
+    return { nomi: nm(f.properties), s: n ? a / n : null, ga: turf.area(f) / 1e4 }; }).filter(r => r.s != null).sort((a, b) => a.s - b.s);
   const tot = cls.reduce((a, b) => a + b, 0) || 1, ctr = fk >= 0 ? [G.lon[fk % G.W], G.lat[Math.floor(fk / G.W)]] : null;
   if (ctr) addLayer(`Yangi maktab uçun tavsiya · ${reg.nomi}`, fcOf([turf.point(ctr, { tavsiya: "Yangi maktab", "eng yaqin maktabgaça, km": +far.toFixed(2) })]), { derived: true, style: { stroke: "#ffffff", fill: "#F2B84B" }, pointStyle: ptStyle(10) });
   const html = `<div class="kpis"><div class="kpi"><b class="num">${schools.length}</b><span>maktab va bog‘ça</span></div><div class="kpi"><b class="num">${clinics.length}</b><span>tibbiyot muassasasi</span></div><div class="kpi"><b class="num">${fmt(tot, 1)}</b><span>turar joy, km²</span></div><div class="kpi"><b class="num">${fmt(cls[3] / tot * 100, 0)}%</b><span>uçalasiga yaqin</span></div></div>
@@ -349,6 +371,7 @@ $("#sCards").addEventListener("click", e => { const b = e.target.closest("[data-
 $("#sRun").addEventListener("click", async () => {
   const reg = sohaRegion(); if (!reg) return toast("Avval viloyat yoki tumanni tanlang");
   const s = SOHALAR.find(x => x.k === SOHA_K); if (!reg.tuman) { sLog("Butun viloyat OpenStreetMap uçun juda katta (yuz minglab obyekt, brauzer qotib qoladi). Iltimos, <b>tuman yoki şaharni</b> tanlang."); return toast("Tuman yoki şaharni tanlang"); }
+  SOHA.poly = reg.f;
   $("#sRun").disabled = true; await busy(true, s.t + ": maʼlumotlar olinmoqda…");
   if (!CITY || String(CITY).startsWith("soha:")) { CITY = "soha:" + reg.nomi; SLAB = 300; redraw(); } // şahar ustunlarini yaşiriş, yupqa plita
   LAYERS.filter(l => l._soha).forEach(l => removeLayer(l.id)); const uid0 = uid;

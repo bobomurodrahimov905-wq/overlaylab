@@ -5,34 +5,103 @@
    • Nuqta tanlanganda: Nominatim (manzil) + Overpass (atrofdagi binolar,
      yöllar, kasalxona, maktab, bekat, sanoat) → masofalar va mezonlar
    ===================================================================== */
+const ESRI = n => `https://server.arcgisonline.com/ArcGIS/rest/services/${n}/MapServer/tile/{z}/{y}/{x}`;
 const BM = {
-  // CARTO plitkalari endi API kalit talab qiladi ("API KEY REQUIRED") — kalitsiz Esri plitkalari ishlatiladi
-  tungi: { nomi: "Tungi (Esri Dark Gray)", url: ["https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"], maxZ: 16, attr: "© Esri, HERE, Garmin, © OpenStreetMap hissadorlari" },
-  yorug: { nomi: "Yorug‘ (Esri Street Map)", url: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"], maxZ: 19, attr: "© Esri, HERE, Garmin, © OpenStreetMap hissadorlari" },
-  osm: { nomi: "Batafsil (OpenStreetMap)", url: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], maxZ: 19, attr: "© OpenStreetMap hissadorlari" }
+  // CARTO plitkalari endi API kalit talab qiladi — kalitsiz OpenStreetMap va Esri plitkalari
+  xarita: { nomi: "Xarita", url: [["https://tile.openstreetmap.org/{z}/{x}/{y}.png"]], maxZ: 19, attr: "© OpenStreetMap hissadorlari" },
+  sxema: { nomi: "Sxema", url: [[ESRI("World_Street_Map")]], maxZ: 19, attr: "© Esri, HERE, Garmin, © OpenStreetMap hissadorlari" },
+  sputnik: { nomi: "Sputnik", url: [[ESRI("World_Imagery")]], maxZ: 19, attr: "© Esri, Maxar, Earthstar Geographics" },
+  gibrid: { nomi: "Gibrid", url: [[ESRI("World_Imagery")], [ESRI("Reference/World_Transportation")], [ESRI("Reference/World_Boundaries_and_Places")]], maxZ: 19, attr: "© Esri, Maxar, HERE, Garmin, © OpenStreetMap hissadorlari" },
+  tungi: { nomi: "Tungi", url: [[ESRI("Canvas/World_Dark_Gray_Base")], [ESRI("Canvas/World_Dark_Gray_Reference")]], maxZ: 16, attr: "© Esri, HERE, Garmin, © OpenStreetMap hissadorlari" }
 };
-window.__BM = (() => { try { return localStorage.getItem("ol_bm") || "tungi"; } catch (e) { return "tungi"; } })();
+// plitka rasmini özimiz yuklaymiz — deck.gl'ning global loader registriga bog'liq emas
+const bmTile = async ({ url, signal }) => { if (!url) return null; const r = await fetch(url, { signal, mode: "cors" }); if (!r.ok) return null; const b = await r.blob(); return createImageBitmap(b); };
+const BM_OLD = { osm: "xarita", yorug: "sxema" };
+window.__BM = (() => { try { const v = localStorage.getItem("ol_bm"); return BM[v] ? v : BM[BM_OLD[v]] ? BM_OLD[v] : "xarita"; } catch (e) { return "xarita"; } })();
+window.__B3D = (() => { try { return localStorage.getItem("ol_b3d") !== "0"; } catch (e) { return true; } })();
 const BM_MINZ = 9;
 window.__ZOOMED = false;
 function zoomHook() {
   const z = VS.zoom, zoomed = z >= 10.3 ? true : z < 9.6 ? false : window.__ZOOMED, show = z >= BM_MINZ;
   let ch = false;
   if (zoomed !== window.__ZOOMED) { window.__ZOOMED = zoomed; if (!CITY) SLAB = zoomed ? 300 : 9000; ch = true; }
+  // köça darajasida plita 2 m: fon xaritasi va 3D binolar yer sathida turadi (MVT binolari yerdan ösadi)
+  const street = z >= 13.5 ? true : z < 13 ? false : window.__STREET; if (street !== window.__STREET) { window.__STREET = street; ch = true; }
+  const want = window.__STREET ? 2 : CITY ? 300 : window.__ZOOMED ? 300 : 9000; if (SLAB !== want) { SLAB = want; ch = true; }
   if (show !== window.__BMSHOW) { window.__BMSHOW = show; ch = true; const a = $("#bmAttr"); if (a) a.style.display = show && LAY.bm && LAY.bm.visible ? "" : "none"; }
   const fine = z >= 12; if (fine !== window.__FINE) { window.__FINE = fine; ch = true; }
+  const b3 = z >= 14.5; if (b3 !== window.__B3SHOW) { window.__B3SHOW = b3; ch = true; }
   if (ch) redraw();
 }
 // 1:10M Natural Earth yöl/daryo/köllari köça darajasida noaniq — 12-zumdan keyin yaşiriladi (fondagi aniq xarita körinadi)
 [LAY.yol, LAY.dar, LAY.kol].forEach(l => { if (!l || !l.build) return; const b = l.build; l.build = ctx => VS.zoom >= 12 && window.__BMSHOW && LAY.bm && LAY.bm.visible ? [] : b(ctx); });
 const zTop = ctx => ctx.is3D && !RELIEF() ? baseH() : 0;
-LAY.bm = addLayer("Köça xaritasi (fon)", null, { kind: "raster", note: "Esri / OpenStreetMap plitkalari · 9-zumdan körinadi", build: ctx => {
+LAY.bm = addLayer("Köça xaritasi (fon)", null, { kind: "raster", note: "Xarita · Sxema · Sputnik · Gibrid · Tungi — 9-zumdan körinadi", build: ctx => {
   if (!window.__BMSHOW) return [];
-  const b = BM[window.__BM] || BM.tungi, zt = zTop(ctx) + 4;
-  return [new TileLayer({ id: "bm-" + window.__BM, data: b.url, minZoom: 0, maxZoom: b.maxZ || 19, tileSize: 256, maxRequests: 8, refinementStrategy: "best-available",
-    renderSubLayers: p => { const { west, south, east, north } = p.tile.bbox; return new BitmapLayer(p, { data: null, image: p.data, bounds: [[west, south, zt], [west, north, zt], [east, north, zt], [east, south, zt]], opacity: .97, parameters: { depthCompare: "always", depthWriteEnabled: false } }); } })];
+  const b = BM[window.__BM] || BM.xarita, zt = zTop(ctx) + 4;
+  return b.url.map((u, n) => new TileLayer({ id: "bm-" + window.__BM + "-" + n, data: u, minZoom: 0, maxZoom: b.maxZ || 19, tileSize: 256, maxRequests: 8, refinementStrategy: "best-available", getTileData: bmTile, zRange: [zt, zt + 4], // plitkalar plita ustida — körinadigan plitkalarni shu balandlik böyiça tanlaş
+    renderSubLayers: p => { const { west, south, east, north } = p.tile.bbox; return new BitmapLayer(p, { data: null, image: p.data, bounds: [[west, south, zt + n], [west, north, zt + n], [east, north, zt + n], [east, south, zt + n]], opacity: n ? 1 : .98, parameters: { depthCompare: "always", depthWriteEnabled: false } }); } }));
 } });
-(() => { const i = LAYERS.indexOf(LAY.bm), v = LAYERS.indexOf(LAY.vil); if (i > -1 && v > -1) { LAYERS.splice(i, 1); LAYERS.splice(v + 1, 0, LAY.bm); renderLayers(); } })();
-(() => { const a = document.createElement("div"); a.id = "bmAttr"; a.style.cssText = "position:absolute;right:10px;bottom:4px;z-index:5;font:11px/1.3 Inter,sans-serif;color:#cfd8e3;background:rgba(10,18,30,.6);padding:2px 6px;border-radius:4px;pointer-events:none;display:none"; a.textContent = BM[window.__BM].attr; $("#map").appendChild(a); })();
+// 3D binolar — OpenFreeMap vektor plitkalari (render_height), 14.5-zumdan
+LAY.b3d = addLayer("3D binolar", null, { kind: "raster", note: "OpenStreetMap binolari · 14.5-zumdan", build: ctx => {
+  if (!window.__B3SHOW || !window.__B3D || !VT.url) return [];
+  const dark = window.__BM === "tungi" || window.__BM === "sputnik" || window.__BM === "gibrid";
+  return [new MVTLayer({ id: "b3d", data: VT.url, minZoom: 14, maxZoom: 14, loadOptions: { mvt: { layers: ["building"] } }, zRange: [0, 250], binary: false, extruded: ctx.is3D, wireframe: false, material: MAT, pickable: false,
+    getElevation: f => +f.properties.render_height || 6, getFillColor: dark ? [205, 212, 222, 225] : [228, 222, 210, 235], getLineColor: [120, 110, 100, 255], lineWidthMinPixels: 1, stroked: !ctx.is3D,
+    filled: true, parameters: { depthCompare: "less-equal" } })];
+} });
+vtTemplate().then(() => redraw()).catch(() => { });
+(() => { const i = LAYERS.indexOf(LAY.bm), v = LAYERS.indexOf(LAY.vil); if (i > -1 && v > -1) { LAYERS.splice(i, 1); LAYERS.splice(LAYERS.indexOf(LAY.vil) + 1, 0, LAY.bm); } const k = LAYERS.indexOf(LAY.b3d); if (k > -1) { LAYERS.splice(k, 1); LAYERS.splice(LAYERS.indexOf(LAY.bm) + 1, 0, LAY.b3d); } renderLayers(); })();
+const BM_ATTR = () => BM[window.__BM].attr + " · 3D binolar: © OpenMapTiles, OpenFreeMap";
+(() => { const a = document.createElement("div"); a.id = "bmAttr"; a.style.cssText = "position:absolute;right:10px;bottom:4px;z-index:5;font:11px/1.3 Inter,sans-serif;color:#cfd8e3;background:rgba(10,18,30,.6);padding:2px 6px;border-radius:4px;pointer-events:none;display:none"; a.textContent = BM_ATTR(); $("#map").appendChild(a); })();
+function setBM(k) { if (!BM[k]) return; window.__BM = k; try { localStorage.setItem("ol_bm", k); } catch (er) { } const a = $("#bmAttr"); if (a) a.textContent = BM_ATTR(); LAY.bm.visible = true; document.querySelectorAll("[data-bm]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.bm === k))); const s = $("#jBm"); if (s) s.value = k; renderLayers(); redraw(); }
+
+/* ---------- xarita turi tugmalari va manzil qidiruvi (Yandex uslubida) ---------- */
+(() => {
+  const st = document.createElement("style");
+  st.textContent = `.msearch{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:11;width:440px}
+  .msearch .box{display:flex;align-items:center;gap:6px;padding:5px 6px 5px 12px}.msearch input{flex:1;min-width:0;border:0;background:transparent;color:var(--ink);font:14px var(--body);outline:none;padding:6px 0}
+  .msearch .res{margin-top:6px;max-height:50vh;overflow:auto;padding:4px;display:none}.msearch .res.on{display:block}
+  .msearch .it{display:block;width:100%;text-align:left;border:0;background:transparent;color:var(--ink);padding:8px 10px;border-radius:8px;cursor:pointer;font:13px var(--body)}.msearch .it:hover,.msearch .it.sel{background:rgba(255,255,255,.08)}.msearch .it small{display:block;color:var(--ink-3);font-size:11.5px}
+  .bmseg{display:flex;gap:2px;padding:3px;flex-wrap:wrap;justify-content:flex-end}.bmseg button{border:0;background:transparent;color:var(--ink-2);font:600 11.5px var(--body);padding:6px 9px;border-radius:999px;cursor:pointer}.bmseg button[aria-pressed="true"]{background:var(--ink);color:#0B1623}
+  .title-chip{display:none}
+  @media (max-width:900px){.msearch{left:14px!important;right:14px;width:auto!important;transform:none!important;top:calc(46vh + 24px)}}
+  @media (max-width:760px){.msearch{left:8px!important;right:8px;width:auto!important;top:104px;bottom:auto}.bmseg{justify-content:space-between}.bmseg button{padding:6px 6px;font-size:11px}}`;
+  document.head.appendChild(st);
+  const w = document.createElement("div"); w.className = "msearch";
+  w.innerHTML = `<div class="box glass"><span aria-hidden="true">🔍</span><input id="mq" type="search" placeholder="Manzil, köça, mahalla yoki obyekt…" autocomplete="off" aria-label="Manzil qidiriş"><button class="btn sm" id="mqGo" type="button">Topiş</button></div><div class="res glass" id="mres" role="listbox"></div>`;
+  document.body.appendChild(w);
+  // keng ekranda: panel va öng tomondagi tugmalar orasiga sigdiriş
+  const place = () => { if (innerWidth <= 900) { w.style.left = w.style.width = w.style.transform = ""; return; }
+    const hb = document.querySelector(".hudbar"), R = hb ? hb.getBoundingClientRect().left - 16 : innerWidth - 16, pn = $("#panel"), L = pn && !pn.classList.contains("hide") ? pn.getBoundingClientRect().right + 14 : 70;
+    const W = Math.max(200, Math.min(440, R - L)), c = innerWidth / 2 - W / 2, x = c >= L && c + W <= R ? c : L;
+    w.style.transform = "none"; w.style.left = x + "px"; w.style.width = W + "px"; };
+  addEventListener("resize", place); setTimeout(place, 50); setTimeout(place, 1500);
+  ["#hidePanel", "#showPanel"].forEach(id => { const b = $(id); if (b) b.addEventListener("click", () => setTimeout(place, 400)); });
+  const seg = document.createElement("div"); seg.className = "bmseg glass"; seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "Xarita turi");
+  seg.innerHTML = Object.entries(BM).map(([k, b]) => `<button type="button" data-bm="${k}" aria-pressed="${k === window.__BM}">${esc(b.nomi)}</button>`).join("") + `<button type="button" id="b3dBtn" aria-pressed="${window.__B3D}" title="3D binolar">3D binolar</button>`;
+  const hud = document.querySelector(".hud"); if (hud) hud.insertBefore(seg, hud.children[1] || null);
+  seg.addEventListener("click", e => { const b = e.target.closest("[data-bm]"); if (b) { setBM(b.dataset.bm); if (VS.zoom < BM_MINZ) toast("Köça xaritasi yaqinlaştirilganda körinadi"); }
+    if (e.target.id === "b3dBtn") { window.__B3D = !window.__B3D; e.target.setAttribute("aria-pressed", String(window.__B3D)); try { localStorage.setItem("ol_b3d", window.__B3D ? "1" : "0"); } catch (er) { } redraw(); } });
+  let items = [], sel = -1, tm = 0;
+  const show = () => { const r = $("#mres"); r.classList.toggle("on", items.length > 0); r.innerHTML = items.map((x, i) => `<button type="button" class="it${i === sel ? " sel" : ""}" data-i="${i}" role="option">${esc(x.nomi)}<small>${esc(x.izoh || "")}</small></button>`).join(""); };
+  const go = x => { items = []; show(); $("#mq").value = x.nomi;
+    if (x.ext && x.ext.length === 4 && Math.abs(x.ext[2] - x.ext[0]) > .004) fitBBox([Math.min(x.ext[0], x.ext[2]), Math.min(x.ext[1], x.ext[3]), Math.max(x.ext[0], x.ext[2]), Math.max(x.ext[1], x.ext[3])], IS3D ? { pitch: 45 } : {}, 17);
+    else setView({ longitude: x.lon, latitude: x.lat, zoom: 16.8, pitch: IS3D ? 50 : 0 }, 1200);
+    LAYERS.filter(l => l._mark).forEach(l => removeLayer(l.id));
+    const mk = addLayer("Qidiruv: " + x.nomi, null, { kind: "raster", derived: true, bbox: [x.lon - .003, x.lat - .002, x.lon + .003, x.lat + .002], build: ctx => { const z = zTop(ctx) + 10; return [new ScatterplotLayer({ id: "mq-pin", data: [x], getPosition: d => [d.lon, d.lat, z], getRadius: 9, radiusUnits: "pixels", getFillColor: [255, 79, 139], getLineColor: [255, 255, 255], lineWidthMinPixels: 3, stroked: true, parameters: { depthCompare: "always" } }), new TextLayer({ id: "mq-t", data: [x], getPosition: d => [d.lon, d.lat, z], getText: d => d.nomi, getSize: 13, getColor: [255, 255, 255], background: true, getBackgroundColor: [10, 20, 34, 220], backgroundPadding: [6, 3], getPixelOffset: [0, -22], characterSet: "auto", fontFamily: "Inter, Arial, sans-serif", parameters: { depthCompare: "always" } })]; } });
+    mk._mark = true; redraw();
+    const ll = $("#jLL"); if (ll) ll.value = `${x.lat.toFixed(6)}, ${x.lon.toFixed(6)}`;
+  };
+  const run = async () => { const q = $("#mq").value.trim(); if (q.length < 2) { items = []; return show(); }
+    const ll = parseLL(q); if (ll && /^\s*-?\d/.test(q)) { items = [{ lon: ll.lon, lat: ll.lat, nomi: `${ll.lat.toFixed(6)}, ${ll.lon.toFixed(6)}`, izoh: "koordinata" }]; sel = 0; return show(); }
+    const my = ++tm; const r = await geoSearch(q); if (my !== tm) return; items = r; sel = r.length ? 0 : -1; show(); if (!r.length) toast("Heç narsa topilmadi"); };
+  let deb = 0; $("#mq").addEventListener("input", () => { clearTimeout(deb); deb = setTimeout(run, 350); });
+  $("#mq").addEventListener("keydown", e => { if (e.key === "ArrowDown") { sel = Math.min(items.length - 1, sel + 1); show(); e.preventDefault(); } else if (e.key === "ArrowUp") { sel = Math.max(0, sel - 1); show(); e.preventDefault(); } else if (e.key === "Enter") { if (items[sel]) go(items[sel]); else run(); } else if (e.key === "Escape") { items = []; show(); } });
+  $("#mqGo").addEventListener("click", () => items[sel] ? go(items[sel]) : run());
+  $("#mres").addEventListener("click", e => { const b = e.target.closest("[data-i]"); if (b) go(items[+b.dataset.i]); });
+  document.addEventListener("click", e => { if (!w.contains(e.target)) { items = []; show(); } });
+})();
 
 /* ---------- joy tahlili ---------- */
 const JOY = { pick: false, last: null };
@@ -65,13 +134,28 @@ const MAJOR = /^(motorway|trunk|primary|secondary)(_link)?$/;
 const HWN = { motorway: "avtomagistral", trunk: "magistral", primary: "asosiy köça", secondary: "ikkinçi darajali köça", tertiary: "uçinçi darajali köça", unclassified: "mahalliy yöl", residential: "turar-joy köçasi", living_street: "turar-joy köçasi", service: "xizmat yöli", motorway_link: "magistral çiqişi", trunk_link: "magistral çiqişi", primary_link: "asosiy köça çiqişi", secondary_link: "köça çiqişi" };
 const yon = b => RUMB[Math.round(((b % 360) + 360) % 360 / 45) % 8];
 const mFmt = km => km < 1 ? Math.round(km * 1000) + " m" : fmt(km, 2) + " km";
-const objName = p => p.name || p["name:uz"] || p["name:ru"] || "";
-const addrOf = p => [p["addr:street"], p["addr:housenumber"]].filter(Boolean).join(", ");
+const objName = p => p ? p.name || p["name:uz"] || p["name:ru"] || "" : "";
+const addrOf = p => p ? [p["addr:street"], p["addr:housenumber"]].filter(Boolean).join(", ") : "";
 function parseLL(s) { const m = String(s).match(/(-?\d+(?:[.,]\d+)?)\s*[,; ]\s*(-?\d+(?:[.,]\d+)?)/); if (!m) return null; let a = +m[1].replace(",", "."), b = +m[2].replace(",", "."); if (a > 50 && b < 50) [a, b] = [b, a]; return { lat: a, lon: b }; }
-async function nomin(lat, lon) {
-  try { const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&accept-language=uz,ru`, { signal: AbortSignal.timeout(15000) }); return r.ok ? await r.json() : null; } catch (e) { return null; }
-}
+async function nomin(lat, lon) { return geoReverse(lat, lon); }
 async function joyFetch(lat, lon) {
+  // asosiy manba — vektor plitkalar (2 km atrof, ~9–16 plitka, keşlanadi); zaxira — Overpass
+  try {
+    const bb = turf.bbox(turf.circle([lon, lat], 2.1, { units: "kilometers", steps: 16 }));
+    const fc = await vtFeatures(bb, ["poi", "transportation", "transportation_name", "landuse", "building", "housenumber"], { onProgress: (d, n) => $("#busyT").textContent = `Atrofdagi obyektlar: xarita plitkalari ${d}/${n}…` });
+    // binolar va uy raqamlari faqat 600 m atrofda (natijada eng yaqinlari körsatiladi; aks holda şahar markazida o'n minglab bino hisoblanadi)
+    const nb = turf.bbox(turf.circle([lon, lat], .6, { units: "kilometers", steps: 16 })), inNb = f => { const b = turf.bbox(f); return b[2] >= nb[0] && b[0] <= nb[2] && b[3] >= nb[1] && b[1] <= nb[3]; };
+    fc.features = fc.features.filter(f => !(f.properties.building || f.properties["addr:housenumber"]) || inNb(f));
+    const hn = fc.features.filter(f => f.properties["addr:housenumber"] && !f.properties.building), blds = fc.features.filter(f => f.properties.building && isPoly(f));
+    // uy raqamini bino poligoniga biriktiriş (manzil uçun)
+    if (hn.length && blds.length) { const idx = blds.map(b => ({ b, bb: turf.bbox(b) })); hn.forEach(h => { const [x, y] = h.geometry.coordinates; const hit = idx.find(o => x >= o.bb[0] && x <= o.bb[2] && y >= o.bb[1] && y <= o.bb[3] && safe(() => turf.booleanPointInPolygon(h, o.b))); if (hit && !hit.b.properties["addr:housenumber"]) hit.b.properties["addr:housenumber"] = h.properties["addr:housenumber"]; }); }
+    // köça nomi: eng yaqin nomli köçani binoga "addr:street" sifatida biriktiriş
+    const named = fc.features.filter(f => f.properties.highway && f.properties.name && /Line/.test(f.geometry.type) && inNb(f));
+    if (named.length) blds.forEach(b => { if (!b.properties["addr:housenumber"]) return; const c = safe(() => turf.centroid(b)); if (!c) return; let best = null, bd = .08; for (const r of named) { const d = safe(() => turf.pointToLineDistance(c, r, { units: "kilometers" })); if (d != null && d < bd) { bd = d; best = r; } } if (best) b.properties["addr:street"] = best.properties.name; });
+    // piyoda yölaklari, zinapoyalar va dala yöllari "kiriş yöli" hisoblanmaydi (Overpass sörovidagi kabi)
+    const feats = fc.features.filter(f => (!f.properties["addr:housenumber"] || f.properties.building) && !/^(footway|path|pedestrian|steps|cycleway|bridleway|platform|track|corridor)$/.test(f.properties.highway || ""));
+    return { fc: { type: "FeatureCollection", features: feats }, areas: [], src: "OpenFreeMap vektor plitkalari" };
+  } catch (e) { console.warn("Vektor plitkalar:", e); }
   const L = `${lat.toFixed(6)},${lon.toFixed(6)}`;
   const q = `[out:json][timeout:40];(nwr(around:2000,${L})["amenity"~"^(hospital|clinic|doctors|pharmacy|school|kindergarten|college|university)$"];nwr(around:2000,${L})["healthcare"~"^(hospital|clinic|centre|doctor)$"];node(around:1000,${L})["highway"="bus_stop"];node(around:1000,${L})["public_transport"="platform"];nwr(around:2000,${L})["landuse"="industrial"];nwr(around:2000,${L})["man_made"="works"];)->.p;.p out center tags;(way(around:700,${L})["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)(_link)?$"];way(around:1200,${L})["railway"="rail"];way(around:300,${L})["building"];)->.g;.g out geom;is_in(${L})->.a;area.a["name"]["admin_level"]->.ad;.ad out tags;`;
   const j = await overpassRaw(q, "Atrofdagi obyektlar olinmoqda");
@@ -130,7 +214,7 @@ async function joyAnalyze(lat, lon) {
     LAYERS.filter(l => l._joy).forEach(l => removeLayer(l.id));
     const lay = addLayer(`Joy tahlili · ${lat.toFixed(5)}, ${lon.toFixed(5)}`, null, { kind: "raster", derived: true, note: `${T.nomi} uçun · ${okN}/${rows.length} mezon`, bbox: turf.bbox(turf.circle([lon, lat], 1, { units: "kilometers" })), build: ctx => { const z = zTop(ctx), Z = c => [c[0], c[1], z + 8];
       return [
-        new SolidPolygonLayer({ id: "jbld", data: BL, getPolygon: d => d.poly.map(r => r.map(c => [c[0], c[1], z])), extruded: ctx.is3D, getElevation: d => d.h, getFillColor: d => d.top ? [242, 184, 75, 235] : [150, 168, 190, 200], getLineColor: [20, 30, 45], material: MAT, pickable: true, tipFn: d => ({ title: objName(d.p) || "Bino", props: { manzil: addrOf(d.p) || "—", qavatlar: d.p["building:levels"] || "—", turi: d.p.building } }), parameters: { depthCompare: "less-equal" } }),
+        new SolidPolygonLayer({ id: "jbld", data: BL, getPolygon: d => d.poly.map(r => r.map(c => [c[0], c[1], z])), extruded: ctx.is3D, getElevation: d => d.h, getFillColor: d => d.top ? [242, 184, 75, 235] : [150, 168, 190, 200], getLineColor: [20, 30, 45], material: MAT, pickable: true, tipFn: d => ({ title: objName(d.p) || "Bino", props: { manzil: addrOf(d.p) || "—", qavatlar: d.p["building:levels"] || "—", turi: d.p.building === "yes" ? "bino" : d.p.building } }), parameters: { depthCompare: "less-equal" } }),
         new PathLayer({ id: "jring", data: rings, getPath: d => d.path.map(Z), getColor: [255, 255, 255, 110], getWidth: 1.5, widthUnits: "pixels", getDashArray: [6, 4], parameters: { depthCompare: "always" } }),
         new TextLayer({ id: "jringt", data: rings, getPosition: d => Z(d.path[0]), getText: d => d.m + " m", getSize: 12, getColor: [230, 236, 242], characterSet: "auto", getPixelOffset: [0, -8], parameters: { depthCompare: "always" } }),
         new PathLayer({ id: "jln", data: LN, getPath: d => d.path.map(Z), getColor: d => [...d.col, 240], getWidth: 3, widthUnits: "pixels", parameters: { depthCompare: "always" } }),
@@ -155,7 +239,7 @@ async function joyAnalyze(lat, lon) {
       <div class="small" style="min-width:0">
         <h3>Oriyentirlar</h3>
         <ul style="margin:0 0 8px;padding-left:18px">
-          ${inside ? `<li style="color:var(--warn)">⚠ Nuqta bino içida: <b>${esc(objName(inside.p) || addrOf(inside.p) || inside.p.building)}</b></li>` : ""}
+          ${inside ? `<li style="color:var(--warn)">⚠ Nuqta bino içida: <b>${esc(objName(inside.p) || addrOf(inside.p) || (inside.p.building === "yes" ? "nomsiz bino" : inside.p.building))}</b></li>` : ""}
           ${blds.filter(b => !b.d.inside).slice(0, 3).map(b => `<li>Bino: <b>${esc(addrOf(b.p) || objName(b.p) || "manzilsiz bino")}</b> — ${mFmt(b.d.km)}, ${yon(b.b)}da${b.p["building:levels"] ? `, ${b.p["building:levels"]} qavat` : ""}</li>`).join("")}
           ${roads[0] ? `<li>Eng yaqin yöl: <b>${esc(objName(roads[0].p) || "nomsiz")}</b> (${esc(HWN[roads[0].p.highway] || roads[0].p.highway)}) — ${mFmt(roads[0].d.km)}</li>` : ""}
           ${major[0] ? `<li>Katta yöl: <b>${esc(objName(major[0].p) || HWN[major[0].p.highway])}</b> — ${mFmt(major[0].d.km)}, ${yon(major[0].b)}da</li>` : ""}
@@ -166,7 +250,7 @@ async function joyAnalyze(lat, lon) {
         <h3>Bog‘çalar</h3><ul style="margin:0 0 8px;padding-left:18px">${li(bog, 2, pl)}</ul>
         <h3>Bekat va sanoat</h3><ul style="margin:0;padding-left:18px">${li(bekat, 2, pl)}${san[0] ? `<li>Sanoat: <b>${esc(objName(san[0].p) || "sanoat hududi")}</b> — ${mFmt(san[0].d.km)}</li>` : ""}</ul>
       </div></div>
-      <p class="small muted">Masofalar — töğri çiziq böyiça. Manba: OpenStreetMap (Overpass, Nominatim). OSM'da çizilmagan bino yoki muassasa hisobga kirmaydi. Mezon qiymatlarini amaldagi şaharsozlik normalariga qarab özgartiring.</p>`;
+      <p class="small muted">Masofalar — töğri çiziq böyiça. Manba: OpenStreetMap (OpenFreeMap vektor plitkalari; zaxira — Overpass; manzil — Nominatim/Photon). OSM'da çizilmagan bino yoki muassasa hisobga kirmaydi. Mezon qiymatlarini amaldagi şaharsozlik normalariga qarab özgartiring.</p>`;
     const csv = toCsv(["mezon", "qiymat", "chegara", "natija"], rows.map(r => [r.txt, r.show, r.t ?? "", r.ok ? "bajarildi" : "bajarilmadi"]));
     setDrawer(`${T.nomi} uçun joy · ${manzil || cp}`, `${okN}/${rows.length} mezon · ${mahalla || tuman || shahar}`, html, ["joy_" + slug(manzil || cp) + ".csv", csv], () => { const b = $("#jCopy"); if (b) b.onclick = () => { try { navigator.clipboard.writeText(cp); toast("Koordinata nusxalandi"); } catch (e) { } }; });
     DRAWER.bind && DRAWER.bind();
@@ -182,5 +266,5 @@ $("#jGo").addEventListener("click", () => { const c = parseLL($("#jLL").value); 
 $("#jLL").addEventListener("keydown", e => { if (e.key === "Enter") $("#jGo").click(); });
 $("#jGeo").addEventListener("click", () => { if (!navigator.geolocation) return toast("Brauzer joylaşuvni bermaydi"); navigator.geolocation.getCurrentPosition(p => joyAnalyze(p.coords.latitude, p.coords.longitude), e => toast("Joylaşuv olinmadi: " + e.message), { enableHighAccuracy: true, timeout: 15000 }); });
 $("#jBm").innerHTML = Object.entries(BM).map(([k, b]) => `<option value="${k}"${k === window.__BM ? " selected" : ""}>${esc(b.nomi)}</option>`).join("");
-$("#jBm").addEventListener("change", e => { window.__BM = e.target.value; try { localStorage.setItem("ol_bm", window.__BM); } catch (er) { } $("#bmAttr").textContent = BM[window.__BM].attr; LAY.bm.visible = true; renderLayers(); redraw(); });
+$("#jBm").addEventListener("change", e => setBM(e.target.value));
 zoomHook();

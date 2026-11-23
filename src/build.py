@@ -22,6 +22,16 @@ libs = ["https://cdn.jsdelivr.net/npm/deck.gl@9.0.41/dist.min.js", "https://cdn.
         "https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js", "https://cdn.jsdelivr.net/npm/shpjs@4.0.4/dist/shp.min.js",
         "https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js", "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js",
         "config.js", "js/baza.js", "data.js", "js/app.js"]
+# js/app.js = app + vt (vektor plitkalar) + soha + joy
+import hashlib
+APP = "".join(open(os.path.join(H, n), encoding="utf-8").read() for n in ("app.js", "vt.js", "soha.js", "joy.js"))
+os.makedirs(os.path.join(R, "js"), exist_ok=True)
+open(os.path.join(R, "js", "app.js"), "w", encoding="utf-8").write(APP)
+# brauzer eski faylni keşdan olmasligi uçun ?v=<xeş>
+def ver(rel):
+    f = os.path.join(R, rel)
+    return rel + "?v=" + hashlib.md5(open(f, "rb").read()).hexdigest()[:8] if os.path.exists(f) else rel
+libs = [ver(u) if not u.startswith("http") else u for u in libs]
 noscript = '<noscript><div style="padding:24px;max-width:720px">OverlayLab — Özbekiston fazoviy ma’lumotlarini ustma-ust tahlil qiliş GIS platformasi. Platforma işlaşi uçun brauzerda JavaScript yoqilgan bölişi kerak. <a href="about.html">Loyiha haqida</a></div></noscript>\n'
 out = head + noscript + "".join(f'<script src="{u}"></script>\n' for u in libs) + "</body>\n</html>\n"
 open(os.path.join(R, "index.html"), "w", encoding="utf-8").write(out)
@@ -40,5 +50,4 @@ if not os.path.exists(os.path.join(R, "ochiq", "aholi.json")):   # birinchi mart
 data["dem"] = json.load(open(os.path.join(H, "data", "dem.json"), encoding="utf-8"))
 open(os.path.join(R, "data.js"), "w", encoding="utf-8").write("window.__DATA__=" + json.dumps(data, ensure_ascii=False, separators=(",", ":")) + ";\n")
 os.makedirs(os.path.join(R, "js"), exist_ok=True)
-open(os.path.join(R, "js", "app.js"), "w", encoding="utf-8").write(open(os.path.join(H, "app.js"), encoding="utf-8").read() + open(os.path.join(H, "soha.js"), encoding="utf-8").read() + open(os.path.join(H, "joy.js"), encoding="utf-8").read())
 print("tayyor:", os.path.join(R, "index.html"))
