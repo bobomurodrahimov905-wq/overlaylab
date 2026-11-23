@@ -117,9 +117,14 @@ async function geoReverse(lat, lon) {
   return null;
 }
 async function geoSearch(q) {
-  const bias = `&lat=${VS.latitude.toFixed(4)}&lon=${VS.longitude.toFixed(4)}`;
-  try { const r = await fetchT(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8${bias}&bbox=55.9,37.1,73.2,45.6`, 10000); const j = await r.json();
-    const fs = (j.features || []).map(f => { const p = f.properties || {}; return { lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], nomi: p.name || [p.street, p.housenumber].filter(Boolean).join(" ") || q, izoh: [p.street && p.name ? p.street + (p.housenumber ? " " + p.housenumber : "") : "", p.locality, p.district, p.city || p.county, p.state].filter(Boolean).join(", "), ext: p.extent }; });
+  // xarita markaziga tortiliş faqat şahar darajasida (zum ≥ 11); joy nomlari va köçalar dökon/kafedan oldin
+  const bias = VS.zoom >= 11 ? `&lat=${VS.latitude.toFixed(4)}&lon=${VS.longitude.toFixed(4)}&location_bias_scale=0.3` : "";
+  const RANK = { place: 0, boundary: 0, highway: 1, tourism: 1, historic: 1, leisure: 2, building: 2, landuse: 2, railway: 2, amenity: 3, office: 4, shop: 5, craft: 5 };
+  try { const r = await fetchT(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=15${bias}&bbox=55.9,37.1,73.2,45.6`, 10000); const j = await r.json();
+    const seen = new Set();
+    const fs = (j.features || []).map((f, i) => ({ f, i, r: (RANK[(f.properties || {}).osm_key] ?? 3) + (/^(city|town|village|suburb|neighbourhood|square|quarter)$/.test((f.properties || {}).osm_value) ? -1 : 0) })).sort((a, b) => a.r - b.r || a.i - b.i).map(o => o.f)
+      .filter(f => { const p = f.properties || {}; if (p.countrycode && p.countrycode !== "UZ") return false; const k = (p.name || "") + "|" + (p.city || p.county || "") + "|" + (p.osm_value || ""); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 8)
+      .map(f => { const p = f.properties || {}; return { lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], nomi: p.name || [p.street, p.housenumber].filter(Boolean).join(" ") || q, izoh: [p.street && p.name ? p.street + (p.housenumber ? " " + p.housenumber : "") : "", p.locality, p.district, p.city || p.county, p.state].filter(Boolean).join(", "), ext: p.extent }; });
     if (fs.length) return fs; } catch (e) { }
   try { const r = await fetchT(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&countrycodes=uz&limit=8&accept-language=uz,ru`, 10000); const j = await r.json();
     return j.map(x => ({ lon: +x.lon, lat: +x.lat, nomi: x.name || x.display_name.split(",")[0], izoh: x.display_name.split(",").slice(1, 4).join(","), ext: x.boundingbox ? [+x.boundingbox[2], +x.boundingbox[1], +x.boundingbox[3], +x.boundingbox[0]] : null })); } catch (e) { }
