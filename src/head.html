@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OverlayLab GIS</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Tungi kartografiya: xarita butun ekran, uning ustida şişa panellar. Qum rang — davlat çegarasi, magenta — overlay natijasi, kök — suv. */
+:root{
+  --bg:#08111B; --bg2:#0E1B2A; --glass:rgba(13,23,36,.78); --glass2:rgba(20,33,50,.86); --line:rgba(150,180,210,.16); --line2:rgba(150,180,210,.28);
+  --ink:#E9EEF2; --ink-2:#97A9B9; --ink-3:#62768A; --sand:#E8C47F; --water:#5BB8FF; --mag:#FF4F8B; --amber:#E9A24E; --good:#5FD19A; --warn:#F2B84B; --bad:#FF6B6B;
+  --display:"Instrument Serif", Georgia, serif; --body:"IBM Plex Sans","Segoe UI",Arial,sans-serif; --mono:"IBM Plex Mono","Courier New",monospace;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:var(--bg);color:var(--ink);font:13.5px/1.5 var(--body)}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--mag);outline-offset:2px}
+h1,h2,h3,h4{margin:0;text-wrap:balance} p{margin:0} a{color:var(--water)}
+.mono{font-family:var(--mono)} .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--ink-2)} .small{font-size:12px}
+
+#map{position:fixed;inset:0;background:
+  radial-gradient(1200px 700px at 62% 42%, #13263B 0%, #0B1623 55%, #070D15 100%);}
+#map::after{content:"";position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(120,160,200,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(120,160,200,.04) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(closest-side,#000 40%,transparent)}
+.glass{background:var(--glass);backdrop-filter:blur(16px) saturate(1.2);-webkit-backdrop-filter:blur(16px) saturate(1.2);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.04)}
+
+/* panel */
+aside.panel{position:fixed;left:14px;top:14px;bottom:14px;width:384px;display:flex;flex-direction:column;z-index:10;overflow:hidden;transition:transform .35s cubic-bezier(.2,.8,.2,1)}
+aside.panel.hide{transform:translateX(calc(-100% - 20px))}
+.ptop{padding:16px 18px 10px;display:flex;align-items:flex-start;gap:10px;border-bottom:1px solid var(--line)}
+.brand{font-family:var(--display);font-size:30px;line-height:.95;letter-spacing:-.01em}
+.brand i{color:var(--mag)}
+.brand small{display:block;font:500 10.5px/1.4 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-top:6px}
+.ptop .sp{flex:1}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#8a96a3;margin-right:6px;vertical-align:1px}.dot.on{background:#2ee6c5;box-shadow:0 0 0 0 rgba(46,230,197,.6);animation:pulse 2s infinite}@keyframes pulse{70%{box-shadow:0 0 0 7px rgba(46,230,197,0)}100%{box-shadow:0 0 0 0 rgba(46,230,197,0)}}
+.t.bz td,.t.bz th{padding:4px 6px}.t.bz .r{text-align:right}.t.bz tr.tot td{font-weight:600;border-top:1px solid var(--line2)}
+input.cell{width:108px;text-align:right;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:6px;color:var(--ink);padding:3px 6px;font:inherit;font-variant-numeric:tabular-nums}input.cell:focus{outline:none;border-color:rgba(255,79,139,.6);background:rgba(255,79,139,.08)}input.cell:disabled{opacity:.5}
+.row2{display:flex;gap:6px}.row2 input{flex:1;min-width:0;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:7px 8px;font:inherit}
+ul.blog{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:12px}ul.blog li{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.02)}
+details summary{cursor:pointer;font-weight:600;font-size:12.5px;margin:4px 0}
+.tabs{display:flex;gap:4px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.tabs button{flex:1;border:1px solid transparent;background:transparent;padding:7px 4px;cursor:pointer;font-size:12.5px;font-weight:500;color:var(--ink-2);border-radius:9px;transition:background .2s,color .2s}
+.tabs button:hover{background:rgba(255,255,255,.04);color:var(--ink)}
+.tabs button[aria-selected="true"]{background:linear-gradient(180deg,rgba(255,79,139,.18),rgba(255,79,139,.06));border-color:rgba(255,79,139,.35);color:#fff}
+.pane{display:none;overflow:auto;padding:14px 16px 18px;flex-direction:column;gap:14px;flex:1;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.pane.on{display:flex}
+.sec{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.sec:first-child{border-top:none;padding-top:0}
+.sec h3{font:600 10.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.sec h2{font-family:var(--display);font-weight:400;font-size:25px;line-height:1.05}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.scards{display:grid;grid-template-columns:1fr 1fr;gap:8px}.scard{display:flex;flex-direction:column;gap:3px;text-align:left;padding:10px 11px;border-radius:10px;border:1px solid var(--line2);background:rgba(255,255,255,.03);cursor:pointer;border-top:3px solid var(--water)}.scard:nth-child(3n+2){border-top-color:var(--amber)}.scard:nth-child(3n){border-top-color:var(--mag)}.scard b{font-size:13.5px}.scard span{font-size:11.5px;color:var(--ink-2);line-height:1.35}.scard.on{background:rgba(91,184,255,.12);border-color:var(--water)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px 8px}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--ink-2)}
+select,input[type=number],input[type=text]{background:rgba(5,12,20,.6);border:1px solid var(--line2);border-radius:7px;padding:6px 8px;min-width:0;width:100%;color:var(--ink)}
+select option{background:#0E1B2A}
+input[type=range]{accent-color:var(--mag);width:100%}
+input[type=checkbox],input[type=radio]{accent-color:var(--mag)}
+.btn{border:1px solid var(--line2);background:rgba(255,255,255,.03);padding:7px 12px;border-radius:999px;cursor:pointer;font-size:12.5px;line-height:1.2;white-space:nowrap;transition:background .2s,border-color .2s,transform .1s}
+.btn:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.35)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:linear-gradient(180deg,#FF5E96,#E03A76);border-color:#FF7AA8;color:#fff;box-shadow:0 6px 18px rgba(255,79,139,.35)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.sm{padding:4px 9px;font-size:11.5px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.icon{border:none;background:transparent;cursor:pointer;padding:3px 6px;border-radius:6px;font:12px var(--mono);color:var(--ink-2)}
+.icon:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.layer{display:grid;grid-template-columns:18px 16px 1fr auto;gap:8px;align-items:center;padding:7px 6px;border-radius:9px}
+.layer:hover{background:rgba(255,255,255,.035)}
+.layer .sw{width:16px;height:12px;border-radius:3px;border:1px solid rgba(255,255,255,.35)}
+.layer .nm{font-size:12.5px;line-height:1.25}
+.layer .nm small{display:block;color:var(--ink-3);font:10.5px var(--mono)}
+.layer .acts{display:flex;gap:1px}
+.preset{display:grid;grid-template-columns:30px 1fr;gap:2px 10px;text-align:left;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.01));padding:10px 11px;border-radius:11px;cursor:pointer;transition:border-color .2s,background .2s,transform .15s}
+.preset:hover{border-color:rgba(255,79,139,.5);background:linear-gradient(180deg,rgba(255,79,139,.1),rgba(255,79,139,.02));transform:translateY(-1px)}
+.preset .n{grid-row:span 2;font:600 11px var(--mono);color:var(--mag);padding-top:2px}
+.preset b{font-weight:600;font-size:13px}
+.preset span{font-size:11.5px;color:var(--ink-2)}
+.crit{border:1px solid var(--line);background:rgba(255,255,255,.025);border-radius:10px;padding:9px;display:flex;flex-direction:column;gap:6px}
+.crit.off{opacity:.5}
+.crit header{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.crit header b{font-size:12.5px}
+.wcell{display:grid;grid-template-columns:1fr 54px;gap:6px;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:5px;font:600 10.5px/1 var(--mono);padding:4px 8px;border-radius:999px;border:1px solid currentColor}
+.pill.ok{color:var(--good)} .pill.no{color:var(--bad)} .pill.wa{color:var(--warn)}
+.ahp{border-collapse:collapse;font-size:11.5px}
+.ahp th,.ahp td{border:1px solid var(--line);padding:2px;text-align:center}
+.ahp th{font:600 10.5px var(--mono);background:rgba(255,255,255,.04);color:var(--ink-2);padding:3px 5px}
+.ahp td.rec{font-family:var(--mono);color:var(--ink-3)}
+.ahp select{padding:2px;font:11.5px var(--mono);width:52px}
+.status{font:11.5px/1.45 var(--mono);color:var(--ink-2);background:rgba(0,0,0,.25);border-left:2px solid var(--mag);padding:7px 9px;border-radius:0 7px 7px 0;white-space:pre-wrap}
+.drop{border:1.5px dashed var(--line2);border-radius:11px;padding:14px;text-align:center;font-size:12px;color:var(--ink-2);cursor:pointer;background:rgba(255,255,255,.02);transition:border-color .2s,color .2s}
+.drop:hover,.drop.over{border-color:var(--mag);color:#fff}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:999px;padding:2px;background:rgba(0,0,0,.25)}
+.seg button{border:none;background:transparent;padding:5px 12px;border-radius:999px;cursor:pointer;font:600 12px var(--mono);color:var(--ink-2)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#0B1623}
+
+/* HUD */
+.hud{position:fixed;top:14px;right:14px;z-index:10;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.hudbar{display:flex;gap:8px;align-items:center;padding:6px}
+.compass{width:38px;height:38px;border-radius:50%;border:1px solid var(--line2);display:grid;place-items:center;cursor:pointer;background:rgba(0,0,0,.25)}
+.compass svg{transition:transform .1s linear}
+.hudctl{padding:10px 12px;display:flex;flex-direction:column;gap:6px;width:230px}
+.hudctl label{display:grid;grid-template-columns:1fr auto;font-size:11.5px;color:var(--ink-2);gap:2px 8px}
+.hudctl label input{grid-column:1/-1}
+.seg button:disabled{opacity:.35;cursor:not-allowed}
+.histpop{display:none;width:280px;max-height:50vh;overflow:auto;padding:10px;flex-direction:column;gap:4px}
+.histpop.on{display:flex}
+.histpop h4{font:600 10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-bottom:4px}
+.hitem{display:flex;gap:8px;align-items:baseline;text-align:left;border:none;background:transparent;color:var(--ink-2);padding:5px 8px;border-radius:7px;cursor:pointer;font-size:12px}
+.hitem:hover{background:rgba(255,255,255,.06);color:var(--ink)}
+.hitem.cur{background:rgba(255,79,139,.16);color:#fff}
+.hitem.fut{opacity:.45;cursor:default}
+.hitem .num{font-size:10.5px;color:var(--ink-3);min-width:18px}
+.title-chip{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:5;padding:8px 16px;font:500 11px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);white-space:nowrap;pointer-events:none}
+.title-chip b{color:var(--sand);font-weight:600}
+.coords{position:fixed;left:414px;bottom:14px;z-index:6;padding:6px 10px;font:11px var(--mono);color:var(--ink-2);pointer-events:none;transition:left .35s}
+.scale{position:fixed;right:14px;bottom:14px;z-index:6;padding:6px 10px;font:11px var(--mono);color:var(--ink-2);display:flex;flex-direction:column;gap:3px;align-items:flex-end;pointer-events:none}
+.scale i{display:block;height:6px;border:1px solid var(--ink-2);border-top:none}
+.legend{position:fixed;right:14px;bottom:62px;z-index:6;padding:10px 12px;min-width:200px;font-size:11.5px;display:none}
+.legend.on{display:block}
+.legend h4{font:600 10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+.legend .ramp{height:10px;border-radius:3px;margin:2px 0}
+.legend .lr{display:flex;justify-content:space-between;font-family:var(--mono);color:var(--ink-2)}
+.legend .it{display:flex;gap:7px;align-items:center;margin-top:4px}
+.legend .it i{width:14px;height:10px;display:inline-block;border-radius:2px}
+.panel-open{position:fixed;left:14px;top:14px;z-index:11;display:none}
+aside.panel.hide ~ .panel-open{display:block}
+
+/* drawer */
+.drawer{position:fixed;left:412px;right:14px;bottom:52px;z-index:9;display:flex;flex-direction:column;max-height:40vh;min-height:0;transition:left .35s, transform .3s}
+.drawer.empty{display:none}
+.drawer.closed .dbody{display:none}
+.dhead{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line)}
+.dhead b{font-family:var(--display);font-weight:400;font-size:21px;line-height:1}
+.dhead .sp{flex:1}
+.dbody{overflow:auto;padding:10px 14px 14px;display:flex;flex-direction:column;gap:12px;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+table.t{border-collapse:collapse;width:100%;font-size:12px}
+.t th,.t td{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top;white-space:nowrap}
+.t th{font:600 10px/1.2 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);position:sticky;top:0;background:#101D2C}
+.t td.r,.t th.r{text-align:right}
+.t tr:hover td{background:rgba(255,255,255,.03)}
+.t tr.sel td{background:rgba(255,79,139,.14)}
+.kpis{display:flex;gap:22px;flex-wrap:wrap}
+.kpi{min-width:110px;border-left:2px solid var(--mag);padding-left:10px}
+.kpi b{display:block;font-family:var(--display);font-weight:400;font-size:30px;line-height:1.02}
+.kpi span{font-size:11px;color:var(--ink-2)}
+.bar{height:6px;background:rgba(255,255,255,.07);border-radius:4px;overflow:hidden;min-width:70px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#7B3FE4,var(--mag))}
+.report{font-size:13px;line-height:1.6;display:flex;flex-direction:column;gap:10px}
+.report h4{font-family:var(--display);font-weight:400;font-size:21px;margin-top:6px;color:#fff}
+.report ol{margin:0;padding-left:18px;color:var(--ink-2)}
+.tip{font:12px/1.45 var(--body)}
+.tip b{font-family:var(--display);font-weight:400;font-size:17px;display:block;margin-bottom:3px;color:#fff}
+.tip table td{padding:1px 8px 1px 0;font:11px var(--mono);color:var(--ink-2)}
+.tip table td+td{color:var(--ink)}
+.toast{position:fixed;bottom:72px;left:50%;transform:translateX(-50%) translateY(10px);background:rgba(233,238,242,.95);color:#0B1623;padding:8px 16px;border-radius:999px;font-size:12.5px;font-weight:500;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;z-index:9999}
+.toast.on{opacity:1;transform:translateX(-50%)}
+.busy{position:fixed;inset:0;background:rgba(5,10,16,.45);display:none;align-items:center;justify-content:center;z-index:9998;backdrop-filter:blur(2px)}
+.busy.on{display:flex}
+.busy div{padding:14px 20px;font:500 13px var(--mono);display:flex;gap:12px;align-items:center}
+.spin{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.2);border-top-color:var(--mag);animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.intro{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;text-align:center;pointer-events:none;transition:opacity 1.2s .2s}
+.intro.out{opacity:0}
+.intro h1{font-family:var(--display);font-weight:400;font-size:clamp(44px,7vw,88px);line-height:.95;text-shadow:0 10px 40px rgba(0,0,0,.6)}
+.intro h1 i{color:var(--mag)}
+.intro p{font:500 12px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--sand);margin-top:10px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media (max-width:900px){
+  aside.panel{width:auto;right:14px;bottom:auto;height:46vh}
+  .drawer{left:14px;bottom:14px}
+  .coords,.title-chip,.hudctl{display:none}
+  .legend{bottom:14px}
+}
+.sheet{display:none}
+/* ---- telefon: panel pastki varaq (bottom sheet) bölib turadi ---- */
+@media (max-width:760px){
+  html,body{overscroll-behavior:none}
+  .hud{top:8px;right:8px;left:8px;align-items:stretch}
+  .hudbar{justify-content:space-between;gap:4px;padding:4px}
+  .hudbar .btn.sm{padding:7px 10px}
+  .compass{transform:scale(.85)}
+  aside.panel{left:0;right:0;top:auto;bottom:0;width:auto;height:60vh;height:60dvh;border-radius:18px 18px 0 0;transition:height .3s cubic-bezier(.2,.8,.2,1)}
+  aside.panel.hide{transform:none}
+  aside.panel.mini{height:118px}
+  aside.panel.mini .pane{display:none!important}
+  .ptop{padding:6px 12px 4px}
+  .brand small{display:none}
+  #hidePanel{display:none}
+  .sheet{display:block;position:absolute;left:50%;top:5px;transform:translateX(-50%);width:56px;height:22px;border:0;background:transparent;cursor:pointer}
+  .sheet::before{content:"";display:block;width:42px;height:5px;border-radius:3px;background:var(--line2);margin:0 auto}
+  .tabs{overflow-x:auto;scrollbar-width:none}
+  .tabs button{flex:none;padding:9px 12px;font-size:14px}
+  .panel-open{display:none!important}
+  .drawer{left:0!important;right:0;bottom:0;max-height:46vh;border-radius:18px 18px 0 0;z-index:12}
+  .legend,.scale,.coords,.title-chip,.hudctl,.histpop{display:none!important}
+  .toast{bottom:140px}
+  input.cell{width:100px;font-size:16px}
+  .row2 input,select,input{font-size:16px}
+}
+</style>
+</head>
+<body>
+<div id="map" aria-label="3D xarita"></div>
+<div class="intro" id="intro" aria-hidden="true"><h1>Overlay<i>Lab</i></h1><p>Özbekiston · ustma-ust tahlil</p></div>
+<div class="title-chip glass"><b>Özbekiston</b> · Natural Earth 1:10M · WGS 84 → LAEA (φ₀ 41.5°, λ₀ 64°)</div>
+
+<aside class="panel glass" id="panel">
+  <div class="ptop"><button class="sheet" id="sheetBtn" type="button" aria-label="Panelni oçiş / yopiş"></button><div class="brand">Overlay<i>Lab</i><small>GIS · 3D ustma-ust tahlil</small></div><span class="sp"></span><button class="icon" id="hidePanel" type="button" title="Panelni yişiş" aria-label="Panelni yişiş">⟨</button></div>
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-p="p-layers">Qatlamlar</button>
+    <button role="tab" aria-selected="false" data-p="p-vec">Overlay</button>
+    <button role="tab" aria-selected="false" data-p="p-mcda">MCDA</button>
+    <button role="tab" aria-selected="false" data-p="p-soha">Sohalar</button>
+    <button role="tab" aria-selected="false" data-p="p-rep">Hisobot</button>
+    <button role="tab" aria-selected="false" data-p="p-baza">Baza</button>
+  </div>
+  <!-- QATLAMLAR -->
+  <div class="pane on" id="p-layers">
+    <div class="sec"><h2>Qatlamlar</h2><div id="layerList"></div></div>
+    <div class="sec"><h3>3D model</h3>
+      <label class="f">Viloyat balandligi<select id="extMetric"><option value="plita">Plita (bir xil qalinlik)</option><option value="aholi">Şahar aholisi</option><option value="yol">Yöl tarmoği ziçligi</option><option value="maydon">Maydon</option><option value="balandlik">Dengiz sathidan örtaça balandlik (ETOPO1)</option><option value="relyef">3D relyef modeli (ETOPO1)</option><option value="mcda">MCDA örtaça S (tahlildan keyin)</option></select></label>
+      <label class="row small"><input type="checkbox" id="lblToggle" checked> Nomlar</label>
+    </div>
+    <div class="sec"><h3>Viloyat tumanlari</h3>
+      <label class="f">Viloyatni tanlang yoki xaritada viloyatni bosing<select id="vilSel"></select></label>
+      <p class="small muted">14 hudud, 199 ta tuman va şahar — haqiqiy ma’muriy çegaralar (geoBoundaries / OCHA, 2020). Har bir tumanning nomi, maydoni va jadvali.</p>
+    </div>
+    <div class="sec"><h3>Şahar çegarasi</h3>
+      <label class="f">Şaharni tanlang yoki xaritada ustunni bosing<select id="citySel"></select></label>
+      <p class="small muted">Haqiqiy ma’muriy çegara (geoBoundaries / OCHA, 2020) va qurilgan hudud (MODIS). Toşkent — 11 tumani bilan.</p>
+    </div>
+    <div class="sec"><h3>Öz ma’lumotingizni qöşiş</h3>
+      <label class="drop" id="drop" for="fileIn"><b>GeoJSON · Shapefile (.zip) · GeoTIFF</b><br>faylni şu yerga taşlang yoki bosing</label>
+      <input type="file" id="fileIn" accept=".geojson,.json,.zip,.tif,.tiff" multiple hidden>
+      <p class="small muted">GeoJSON WGS 84 da (yoki “crs” da EPSG:326xx). Shapefile .prj böyiça qayta proyeksiyalanadi. GeoTIFF: EPSG:4326, 3857 yoki 326xx — MCDA mezoni böladi; nomida “dem/srtm” bölsa, nişablik ham hisoblanadi.</p>
+    </div>
+    <div class="sec"><h3>Manba</h3><p class="small muted">Natural Earth 1:10M vektorlar (jamoat mulki); relyef — ETOPO1 10′ (NOAA, CC-BY). Milliy darajadagi tahlil uçun mos; çegaralar umumlaştirilgan, faqat yirik daryolar.</p></div>
+  </div>
+  <!-- VEKTOR -->
+  <div class="pane" id="p-vec">
+    <div class="sec"><h2>Real stsenariylar</h2><p class="small muted">Bir tugma — butun overlay zanjiri haqiqiy geometriya ustida bajariladi va 3D da körsatiladi.</p><div id="presets" style="display:flex;flex-direction:column;gap:7px"></div></div>
+    <div class="sec"><h2>Qölda overlay</h2>
+      <div class="grid2">
+        <label class="f">Amal<select id="vOp">
+          <option value="intersect">Intersect (A ∩ B)</option><option value="union">Union (A ∪ B)</option><option value="erase">Erase (A − B)</option>
+          <option value="symdiff">Symmetric difference</option><option value="identity">Identity</option><option value="clip">Clip</option>
+          <option value="buffer">Buffer (faqat A)</option><option value="sjoin">Spatial join (A → B)</option><option value="dissolve">Dissolve (A)</option>
+        </select></label>
+        <label class="f">Parametr (km)<input type="number" id="vParam" value="10" step="any"></label>
+        <label class="f">A — kiriş<select id="vA"></select></label>
+        <label class="f" id="vBwrap">B — overlay<select id="vB"></select></label>
+        <label class="f">A filtri<input type="text" id="vFilt" placeholder="nomi=Amudaryo|Sirdaryo"></label>
+        <label class="f">Guruh maydoni<input type="text" id="vField" placeholder="nomi"></label>
+      </div>
+      <p class="small muted" id="vHelp"></p>
+      <div class="row"><button class="btn primary" id="vRun" type="button">Bajariş</button><label class="row small"><input type="checkbox" id="vDiss" checked> Buferni birlaştiriş</label></div>
+      <div class="status" id="vLog">Tayyor.</div>
+    </div>
+    <div class="sec"><h3>Sifat nazorati</h3>
+      <div class="grid2"><label class="f">Sliver: Polsby-Popper &lt;<input type="number" id="ppThr" value="0.05" step="0.01"></label><label class="f">va maydon &lt; km²<input type="number" id="slThr" value="5" step="0.5"></label></div>
+      <p class="small muted">Polsby-Popper = 4πA / P² (doira = 1, ingiçka tasma → 0).</p></div>
+  </div>
+  <!-- MCDA -->
+  <div class="pane" id="p-mcda">
+    <div class="sec"><h2>Qulaylik tahlili</h2>
+      <label class="f">Stsenariy<select id="mPreset"><option value="logi">Logistika markazi uçun joy</option><option value="agro">Suğoriladigan dehqonçilik klasteri</option></select></label>
+      <div class="grid2"><label class="f">Katak ölçami<select id="mRes"><option value="10">10 km</option><option value="5" selected>5 km</option><option value="2.5">2.5 km</option></select></label>
+      <label class="f">Agregatsiya<select id="mAgg"><option value="wlc">WLC (vaznli yiğindi)</option><option value="owa">OWA (Yager)</option><option value="bool">Boolean AND</option></select></label></div>
+      <div id="mAggParam"></div>
+    </div>
+    <div class="sec"><h3>Mezonlar va qiymat funksiyalari</h3><div id="mCrit" style="display:flex;flex-direction:column;gap:6px"></div>
+      <p class="small muted">Çiziqli qiymat funksiyasi: “kam — yaxşi” a gaça 1, b dan keyin 0; “köp — yaxşi” — teskarisi.</p></div>
+    <div class="sec"><h3>Vaznlar</h3>
+      <div class="row"><label class="row small"><input type="radio" name="wm" value="ahp" checked> AHP (Saaty)</label><label class="row small"><input type="radio" name="wm" value="man"> Qölda</label></div>
+      <div id="mW"></div></div>
+    <div class="sec"><h3>Çeklovlar (0/1)</h3>
+      <label class="row small"><input type="checkbox" id="cLake" checked> Köl va suv omborlari içi</label>
+      <label class="row small"><input type="checkbox" id="cRiv" checked> Daryodan <input type="number" id="cRivKm" value="3" step="0.5" style="width:64px"> km gaça (toşqin zonasi)</label>
+    </div>
+    <div class="sec"><div class="row"><button class="btn primary" id="mRun" type="button">Tahlilni bajariş</button><button class="btn" id="mSens" type="button" disabled>Sezgirlik tahlili</button></div>
+      <div class="grid2"><label class="f">Monte-Karlo takrorlar<input type="number" id="mcN" value="300" min="50" max="2000" step="50"></label><label class="f">Dirixle κ<input type="number" id="mcK" value="50" min="5" max="500" step="5"></label></div>
+      <div class="status" id="mLog">Parametrlarni tanlang va “Tahlilni bajariş” ni bosing.</div></div>
+  </div>
+  <!-- HISOBOT -->
+  <div class="pane" id="p-soha">
+    <div class="sec"><h2>Amaliy yönalişlar</h2>
+      <p class="small muted">Hududni tanlang, yönalişni tanlang va “Tahlil” ni bosing. Maʼlumotlar oçiq bazalardan (OpenStreetMap, USGS, Open-Meteo) şu zahoti olinadi.</p>
+      <div class="grid2"><label class="f">Viloyat<select id="sVil"></select></label><label class="f">Tuman / şahar<select id="sTum"><option value="">— butun viloyat —</option></select></label></div>
+    </div>
+    <div class="sec"><div class="scards" id="sCards"></div></div>
+    <div class="sec"><div id="sParams"></div>
+      <div class="row"><button class="btn primary" id="sRun" type="button">Tahlil</button></div>
+      <div class="status" id="sLog">Natija xaritada va pastki panelda çiqadi, CSV yuklab oliş mumkin.</div></div>
+  </div>
+  <div class="pane" id="p-baza">
+    <div class="sec" id="bazaBody"><h2>Ma’lumotlar bazasi</h2>
+      <p class="small" id="ochiqStatus"></p>
+      <p class="small" id="bazaStatus"></p>
+      <p class="small muted" id="bazaRole"></p>
+      <label class="f">Körsatkiç<select id="bazaK"></select></label>
+      <table class="t bz" id="bazaHud"></table>
+      <p class="small muted">Manba: Milliy statistika qömitasining ochiq API si (SIAT, siat.stat.uz) — sayt uni har kuni avtomatik tekşiradi; aloqa bölmasa ichki nusxa işlatiladi. Qöl bilan kiritilgan qiymat faqat SIAT dagidan yangiroq sanaga ega bölsa ustun turadi. Ziçlik = aholi ÷ xaritadagi maydon (LAEA). Qiymat özgarsa, 3D balandlik, ranglar, ziçlik, tooltip va hisobotlar avtomatik qayta hisoblanadi.</p>
+      <div id="bazaAdd"><h3>Yangi körsatkiç qöşiş</h3>
+        <div class="row2"><input id="bazaNewN" placeholder="Nomi, masalan: Maktablar soni"><input id="bazaNewB" placeholder="Birligi: ta"></div>
+        <button class="btn" id="bazaNewBtn" type="button">＋ Körsatkiç qöşiş</button>
+        <p class="small muted">Qöşilgan körsatkiç yuqoridagi röyxatda va «Viloyat balandligi» menyusida paydo böladi — qiymatlarni kiriting, xarita öşa körsatkiç böyiça 3D ga aylanadi.</p></div>
+      <details><summary>Şaharlar aholisi (29 ta)</summary><table class="t bz" id="bazaSha"></table></details>
+      <h3>Özgarişlar jurnali</h3><ul class="blog" id="bazaLog"></ul>
+      <button class="btn ghost" id="bazaExp" type="button">⤓ Bazani CSV ga yuklab oliş</button>
+    </div>
+  </div>
+  <div class="pane" id="p-rep">
+    <div class="sec"><h2>Ilmiy hisobot</h2><p class="small muted">Metodika va natijalar joriy parametrlardan avtomatik tuziladi.</p>
+      <div class="row"><button class="btn primary" id="rBuild" type="button">Yangilaş</button><button class="btn" id="rMd" type="button">⬇ .md</button><button class="btn" id="rTif" type="button" disabled>⬇ GeoTIFF</button><button class="btn" id="rCsv" type="button" disabled>⬇ .csv</button><button class="btn" id="rPng" type="button">⬇ Xarita .png</button></div></div>
+    <div class="report" id="report"><p class="muted">Avval MCDA yoki overlay tahlilini bajaring.</p></div>
+  </div>
+</aside>
+<button class="btn panel-open glass" id="showPanel" type="button">☰ Panel</button>
+
+<div class="hud">
+  <div class="hudbar glass">
+    <div class="seg" role="group" aria-label="Körinişi"><button type="button" id="v2d" aria-pressed="false">2D</button><button type="button" id="v3d" aria-pressed="true">3D</button></div>
+    <button class="btn sm" id="orbit" type="button" aria-pressed="false">⟳ Aylantiriş</button>
+    <div class="seg" role="group" aria-label="Tarix"><button type="button" id="undoBtn" aria-label="Orqaga" disabled>↶</button><button type="button" id="redoBtn" aria-label="Oldinga" disabled>↷</button><button type="button" id="histBtn" aria-label="Tarix röyxati">☰</button></div>
+    <button class="btn sm" id="home" type="button">⌂</button>
+    <div class="compass" id="compass" title="Şimolga qaratiş"><svg width="20" height="26" viewBox="0 0 20 26" aria-hidden="true"><path d="M10 1 L16 13 L10 11 L4 13 Z" fill="#FF4F8B"/><path d="M10 25 L4 13 L10 15 L16 13 Z" fill="#97A9B9"/></svg></div>
+  </div>
+  <div class="histpop glass" id="histPop"><h4>Tarix · bosib qaytiş</h4><div id="histList"></div><p class="small muted">Ctrl+Z — orqaga · Ctrl+Y — oldinga</p></div>
+  <div class="hudctl glass">
+    <label>Qiyalik <span class="num" id="pitchV">50°</span><input type="range" id="pitch" min="0" max="75" value="50"></label>
+    <label>Balandlik masştabi <span class="num" id="exagV">×1.0</span><input type="range" id="exag" min="0.2" max="4" step="0.1" value="1"></label>
+    <p class="small muted">Sudrang — siljitiş · Ctrl/öng tugma — aylantiriş · ğildirak — masştab</p>
+  </div>
+</div>
+<div class="coords glass" id="coords">—</div>
+<div class="scale glass" id="scale"><span id="scaleT">—</span><i id="scaleB" style="width:80px"></i></div>
+<div class="legend glass" id="legend"></div>
+<div class="drawer glass empty" id="drawer">
+  <div class="dhead"><b id="dTitle">Natijalar</b><span class="small muted" id="dSub"></span><span class="sp"></span><button class="btn sm" id="dCsv" type="button" disabled>⬇ .csv</button><button class="icon" id="dToggle" type="button" aria-label="Jadvalni yiğiş">▾</button><button class="icon" id="dClose" type="button" aria-label="Yopiş">✕</button></div>
+  <div class="dbody" id="dBody"></div>
+</div>
+<div class="busy" id="busy"><div class="glass"><span class="spin"></span><span id="busyT">Hisoblanmoqda…</span></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>

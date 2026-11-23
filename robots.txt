@@ -1,4 +1,3 @@
 User-agent: *
 Allow: /
-
 Sitemap: https://bobomurodrahimov905-wq.github.io/overlaylab/sitemap.xml
