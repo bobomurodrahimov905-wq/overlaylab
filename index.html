@@ -188,18 +188,44 @@ table.t{border-collapse:collapse;width:100%;font-size:12px}
   .coords,.title-chip,.hudctl{display:none}
   .legend{bottom:14px}
 }
+.sheet{display:none}
+/* ---- telefon: panel pastki varaq (bottom sheet) bölib turadi ---- */
+@media (max-width:760px){
+  html,body{overscroll-behavior:none}
+  .hud{top:8px;right:8px;left:8px;align-items:stretch}
+  .hudbar{justify-content:space-between;gap:4px;padding:4px}
+  .hudbar .btn.sm{padding:7px 10px}
+  .compass{transform:scale(.85)}
+  aside.panel{left:0;right:0;top:auto;bottom:0;width:auto;height:60vh;height:60dvh;border-radius:18px 18px 0 0;transition:height .3s cubic-bezier(.2,.8,.2,1)}
+  aside.panel.hide{transform:none}
+  aside.panel.mini{height:118px}
+  aside.panel.mini .pane{display:none!important}
+  .ptop{padding:6px 12px 4px}
+  .brand small{display:none}
+  #hidePanel{display:none}
+  .sheet{display:block;position:absolute;left:50%;top:5px;transform:translateX(-50%);width:56px;height:22px;border:0;background:transparent;cursor:pointer}
+  .sheet::before{content:"";display:block;width:42px;height:5px;border-radius:3px;background:var(--line2);margin:0 auto}
+  .tabs{overflow-x:auto;scrollbar-width:none}
+  .tabs button{flex:none;padding:9px 12px;font-size:14px}
+  .panel-open{display:none!important}
+  .drawer{left:0!important;right:0;bottom:0;max-height:46vh;border-radius:18px 18px 0 0;z-index:12}
+  .legend,.scale,.coords,.title-chip,.hudctl,.histpop{display:none!important}
+  .toast{bottom:140px}
+  input.cell{width:100px;font-size:16px}
+  .row2 input,select,input{font-size:16px}
+}
 </style>
 </head>
 <body>
-<div id="map" aria-label="3D xarita"></div>
 <noscript><div style="padding:24px;max-width:720px;margin:auto;position:relative;z-index:30">
 <h1>OverlayLab GIS — O‘zbekiston 3D xaritasi</h1>
 <p>O‘zbekistonning 14 hududi, 199 ta tuman va 29 ta shahri haqiqiy ma’muriy chegaralari bilan 3D xaritada. Vektor overlay (intersect, union, erase, buffer, spatial join), MCDA qulaylik tahlili (WLC, OWA, AHP), sezgirlik tahlili va avtomatik ilmiy hisobot. Ishlatish uchun JavaScript yoqilgan bo‘lishi kerak.</p></div></noscript>
+<div id="map" aria-label="3D xarita"></div>
 <div class="intro" id="intro" aria-hidden="true"><h1>Overlay<i>Lab</i></h1><p>Özbekiston · ustma-ust tahlil</p></div>
 <div class="title-chip glass"><b>Özbekiston</b> · Natural Earth 1:10M · WGS 84 → LAEA (φ₀ 41.5°, λ₀ 64°)</div>
 
 <aside class="panel glass" id="panel">
-  <div class="ptop"><div class="brand">Overlay<i>Lab</i><small>GIS · 3D ustma-ust tahlil</small></div><span class="sp"></span><button class="icon" id="hidePanel" type="button" title="Panelni yişiş" aria-label="Panelni yişiş">⟨</button></div>
+  <div class="ptop"><button class="sheet" id="sheetBtn" type="button" aria-label="Panelni oçiş / yopiş"></button><div class="brand">Overlay<i>Lab</i><small>GIS · 3D ustma-ust tahlil</small></div><span class="sp"></span><button class="icon" id="hidePanel" type="button" title="Panelni yişiş" aria-label="Panelni yişiş">⟨</button></div>
   <div class="tabs" role="tablist">
     <button role="tab" aria-selected="true" data-p="p-layers">Qatlamlar</button>
     <button role="tab" aria-selected="false" data-p="p-vec">Overlay</button>
@@ -393,7 +419,7 @@ const lighting = new LightingEffect({ amb: new AmbientLight({ color: [255, 255, 
 const MAT = { ambient: .45, diffuse: .65, shininess: 36, specularColor: [70, 80, 95] };
 const deckgl = new Deck({
   parent: $("#map"), views: new MapView({ repeat: false }), viewState: VS, controller: { dragRotate: true, touchRotate: true, inertia: 300 },
-  effects: [lighting], layers: [], useDevicePixels: true, pickingRadius: 4, glOptions: { preserveDrawingBuffer: true }, deviceProps: { webgl: { preserveDrawingBuffer: true } },
+  effects: [lighting], layers: [], useDevicePixels: matchMedia('(max-width:760px)').matches ? Math.min(devicePixelRatio || 1, 1.5) : true, pickingRadius: 4, glOptions: { preserveDrawingBuffer: true }, deviceProps: { webgl: { preserveDrawingBuffer: true } },
   onViewStateChange: ({ viewState }) => { VS = viewState; deckgl.setProps({ viewState: VS }); hud(); return VS; },
   onHover: info => { if (info.coordinate) { const [lng, lat] = info.coordinate, z = Math.floor((lng + 180) / 6) + 1, u = proj4("EPSG:4326", "EPSG:326" + Math.min(45, Math.max(38, z)), [lng, lat]); $("#coords").textContent = `φ ${lat.toFixed(4)}°  λ ${lng.toFixed(4)}°  ·  UTM ${z}N  ${Math.round(u[0])} E  ${Math.round(u[1])} N`; } },
   getTooltip: info => tooltip(info),
@@ -406,9 +432,12 @@ function tooltip({ object, layer }) {
   return { html: `<div class="tip"><b>${esc(p.title)}</b><table>${Object.entries(p.props || {}).filter(([k]) => !k.startsWith("_")).slice(0, 14).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(typeof v === "number" ? (Number.isInteger(v) ? v.toLocaleString("en-US").replace(/,/g, " ") : v.toFixed(3)) : v)}</td></tr>`).join("")}</table></div>`, style: { background: "rgba(13,23,36,.94)", border: "1px solid rgba(150,180,210,.25)", borderRadius: "10px", padding: "10px 12px", color: "#E9EEF2", boxShadow: "0 12px 30px rgba(0,0,0,.5)", maxWidth: "320px" } };
 }
 function setView(v, dur = 0) { VS = { ...VS, ...v, transitionDuration: dur, transitionInterpolator: dur ? new FlyToInterpolator({ speed: 1.3 }) : null }; deckgl.setProps({ viewState: VS }); hud(); }
+const MOB = () => matchMedia("(max-width:760px)").matches;
 function fitBBox(bb, extra = {}, maxZ = 9) {
   const el = $("#map"), W = el.clientWidth, H = el.clientHeight, panel = $("#panel").classList.contains("hide") || W < 900 ? 40 : 420, dr = $("#drawer").classList.contains("empty") || $("#drawer").classList.contains("closed") ? 60 : Math.min(H * .55, Math.max(Math.min(H * .42, 360), $("#drawer").offsetHeight + 30));
-  try { const vp = new WebMercatorViewport({ width: W, height: H }); const f = vp.fitBounds([[bb[0], bb[1]], [bb[2], bb[3]]], { padding: { left: Math.min(panel, W / 3), right: 60, top: 80, bottom: Math.min(dr, H * .55) }, maxZoom: maxZ }); setView({ longitude: f.longitude, latitude: f.latitude, zoom: f.zoom - (IS3D ? .25 : 0), ...extra }, reduceMotion ? 0 : 1200); } catch (e) { console.warn(e); }
+  const mob = MOB(), sheetH = mob ? Math.max($("#panel").getBoundingClientRect().height, $("#drawer").classList.contains("empty") ? 0 : $("#drawer").getBoundingClientRect().height) : 0;
+  const pad = mob ? { left: 6, right: 6, top: 70, bottom: Math.min(sheetH + 16, H * .7) } : { left: Math.min(panel, W / 3), right: 60, top: 80, bottom: Math.min(dr, H * .55) };
+  try { const vp = new WebMercatorViewport({ width: W, height: H }); const f = vp.fitBounds([[bb[0], bb[1]], [bb[2], bb[3]]], { padding: pad, maxZoom: maxZ }); setView({ longitude: f.longitude, latitude: f.latitude + (mob && IS3D ? (bb[3] - bb[1]) * .16 : 0), zoom: f.zoom + (mob ? .2 : IS3D ? -.25 : 0), ...extra }, reduceMotion ? 0 : 1200); } catch (e) { console.warn(e); }
 }
 function hud() {
   $("#compass svg").style.transform = `rotate(${-VS.bearing}deg)`;
@@ -418,7 +447,7 @@ function hud() {
   $("#scaleB").style.width = (nice / mpp) + "px"; $("#scaleT").textContent = (nice >= 1000 ? nice / 1000 + " km" : nice + " m") + (VS.pitch > 5 ? " · markazda" : "");
 }
 $("#compass").addEventListener("click", () => setView({ bearing: 0 }, 600));
-$("#home").addEventListener("click", () => CITY ? exitCity() : setView(IS3D ? HOME : { ...HOME, pitch: 0, bearing: 0 }, 1400));
+$("#home").addEventListener("click", () => CITY ? exitCity() : MOB() ? fitBBox([55.9, 37.1, 73.2, 45.6], { pitch: IS3D ? 15 : 0, bearing: 0 }) : setView(IS3D ? HOME : { ...HOME, pitch: 0, bearing: 0 }, 1400));
 $("#pitch").addEventListener("input", e => { setView({ pitch: +e.target.value }); if (+e.target.value > 0 && !IS3D) set3D(true, false); });
 $("#exag").addEventListener("input", e => { EXAG = +e.target.value; exagLbl(); redraw(); });
 function exagLbl() { $("#exagV").textContent = "×" + EXAG.toFixed(1) + (RELIEF() ? ` · relyef ×${Math.round(VEX())}` : ""); }
@@ -427,6 +456,9 @@ $("#v2d").addEventListener("click", () => { set3D(false); commit("2D körinişi"
 $("#orbit").addEventListener("click", e => { ORBIT = !ORBIT; e.currentTarget.setAttribute("aria-pressed", ORBIT); e.currentTarget.classList.toggle("primary", ORBIT); if (ORBIT) { if (!IS3D) set3D(true); spin(); } });
 function spin() { if (!ORBIT) return; VS = { ...VS, bearing: VS.bearing + .12, transitionDuration: 0, transitionInterpolator: null }; deckgl.setProps({ viewState: VS }); hud(); requestAnimationFrame(spin); }
 $("#hidePanel").addEventListener("click", () => { $("#panel").classList.add("hide"); $("#coords").style.left = "14px"; $("#drawer").style.left = "14px"; });
+$("#sheetBtn").addEventListener("click", () => $("#panel").classList.toggle("mini"));
+if (MOB()) $("#panel").classList.add("mini");
+$$(".tabs button").forEach(b => b.addEventListener("click", () => $("#panel").classList.remove("mini")));
 $("#showPanel").addEventListener("click", () => { $("#panel").classList.remove("hide"); $("#coords").style.left = ""; $("#drawer").style.left = ""; });
 
 /* ---------- qatlam reyestri ---------- */
@@ -486,7 +518,7 @@ function redraw() {
 /* ---------- jadval (pastki panel) ---------- */
 let drawerCsv = null;
 let DRAWER = null;
-function setDrawer(title, sub, html, csv, bind) { DRAWER = { title, sub, html, csv, bind: bind || null }; const d = $("#drawer"); d.classList.remove("empty", "closed"); $("#dTitle").textContent = title; $("#dSub").textContent = sub || ""; $("#dBody").innerHTML = html; drawerCsv = csv || null; $("#dCsv").disabled = !csv; $("#dToggle").textContent = "▾"; }
+function setDrawer(title, sub, html, csv, bind) { DRAWER = { title, sub, html, csv, bind: bind || null }; const d = $("#drawer"); d.classList.remove("empty", "closed"); $("#dTitle").textContent = title; $("#dSub").textContent = sub || ""; $("#dBody").innerHTML = html; drawerCsv = csv || null; $("#dCsv").disabled = !csv; $("#dToggle").textContent = "▾"; if (MOB()) $("#panel").classList.add("mini"); }
 $("#dToggle").addEventListener("click", () => { const c = $("#drawer").classList.toggle("closed"); $("#dToggle").textContent = c ? "▴" : "▾"; });
 $("#dClose").addEventListener("click", () => $("#drawer").classList.add("empty"));
 $("#dCsv").addEventListener("click", () => drawerCsv && download(drawerCsv[0], drawerCsv[1]));
@@ -650,7 +682,7 @@ $$(".tabs button").forEach(b => b.addEventListener("click", () => { $$(".tabs bu
 function setLegend(html) { const l = $("#legend"); l.innerHTML = html; l.classList.add("on"); }
 
 /* ---------- kirişdagi kamera harakati ---------- */
-setTimeout(() => { setView(HOME, reduceMotion ? 0 : 3200); }, 350);
+setTimeout(() => { if (MOB()) fitBBox([55.9, 37.1, 73.2, 45.6], { pitch: 15, bearing: 0 }); else setView(HOME, reduceMotion ? 0 : 3200); }, 350);
 setTimeout(() => $("#intro").classList.add("out"), 1300);
 setTimeout(() => $("#intro").remove(), 3000);
 hud();
@@ -1337,7 +1369,9 @@ $("#bazaNewBtn").addEventListener("click", async () => {
 });
 $("#bazaExp").addEventListener("click", () => download("ozbekiston_hududlar_baza.csv", toCsv(["iso", "hudud", "doimiy_aholi", "zichlik_km2", "maydon_km2", ...BAZA.defs.map(d => d.k)], D.viloyatlar.features.map(f => { const p = f.properties; return [p.iso, p.nomi, p.aholi, +(p.ziclik || 0).toFixed(1), p.maydon_km2, ...BAZA.defs.map(d => p["k_" + d.k] ?? "")]; }))));
 setInterval(() => { if (BAZA.live) bazaRender(); }, 60000);
+window.bazaAuth = async () => { if (!BAZA.user) return; try { BAZA.uid = await BAZA.user.id(); const cw = await BAZA.user.can("data.write"); BAZA.canWrite = cw == null ? null : !!cw; } catch (e) { BAZA.canWrite = false; } bazaRender(); };
 bazaInit();
+
 
 </script>
 </body>
