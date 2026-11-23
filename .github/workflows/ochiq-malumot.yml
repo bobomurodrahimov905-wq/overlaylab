@@ -1,0 +1,41 @@
+name: Ochiq ma'lumotlarni yangilash
+
+on:
+  schedule:
+    - cron: "17 1 * * *"   # har kuni 06:17 (Toshkent vaqti)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  yangilash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SIAT va geoBoundaries'dan yangi ma'lumot olish
+        id: olish
+        run: python tools/ochiq_yangilash.py
+      - name: O'zgarish bo'lsa commit qilish
+        if: always()
+        run: |
+          git config user.name  "overlaylab-bot"
+          git config user.email "overlaylab-bot@users.noreply.github.com"
+          git add ochiq/
+          if git diff --cached --quiet; then
+            echo "O'zgarish yo'q"
+          else
+            git commit -m "Ochiq ma'lumotlar yangilandi: $(date -u +%Y-%m-%d)"
+            git push
+          fi
+      - name: Chegara yangilansa Issue ochish
+        if: steps.olish.outputs.chegara_ozgardi == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "geoBoundaries: O'zbekiston chegaralarining yangi versiyasi chiqdi" \
+            --body "Avtomatik tekshiruv UZB ADM1/ADM2 uchun yangi versiyani topdi. ochiq/holat.json faylini ko'ring."
