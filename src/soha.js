@@ -9,7 +9,7 @@
      • foydalanuvçi yuklagan GeoTIFF/Shapefile — tuproq, şörlaniş, kadastr uçastkalari
    ===================================================================== */
 const SOHA = { cache: {}, reg: null, last: null };
-const OVP = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
+const OVP = ["https://overpass-api.de/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
 const sLog = m => { const el = $("#sLog"); if (el) el.innerHTML = m; const b = $("#busyT"); if (b && $("#busy").classList.contains("on")) b.textContent = String(m).replace(/<[^>]+>/g, ""); };
 function joinRings(segs) {
   const eq = (a, b) => a[0] === b[0] && a[1] === b[1], open = segs.filter(s => s.length > 1).map(s => s.slice()), rings = [];
